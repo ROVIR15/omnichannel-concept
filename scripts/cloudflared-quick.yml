@@ -1,0 +1,10 @@
+# Deliberately minimal — this file exists to SHADOW ~/.cloudflared/config.yml.
+#
+# cloudflared reads the global config even for quick tunnels. If that file has
+# ingress rules for other projects, requests to the trycloudflare.com hostname
+# match none of them, fall through to its catch-all, and return an empty 404 —
+# the local server never sees them. Pointing --config here avoids that.
+#
+# It cannot be comments-only: cloudflared 2025+ errors with "Configuration
+# file was empty". One harmless key satisfies it.
+no-autoupdate: true

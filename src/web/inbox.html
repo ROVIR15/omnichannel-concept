@@ -1,0 +1,238 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Omnichannel Inbox</title>
+<style>
+  :root { color-scheme: light dark; --line:#0002; --muted:#0009; --accent:#2563eb; --warn:#b45309; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; display:flex; flex-direction:column; height:100vh; }
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; font-weight:700; }
+  nav a { color:var(--muted); text-decoration:none; margin-left:14px; font-size:13px; }
+  nav a.on, nav a:hover { color:var(--accent); }
+  select, input { padding:7px 9px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
+  button { padding:7px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:inherit; }
+  #body { flex:1; display:flex; min-height:0; }
+  #list { width:320px; border-right:1px solid var(--line); overflow-y:auto; }
+  .conv { padding:12px 14px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .conv:hover { background:#0000000a; }
+  .conv.active { background:#0000000f; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .name { font-weight:640; }
+  .preview { color:var(--muted); font-size:12px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .badge { font-size:10px; text-transform:uppercase; letter-spacing:.05em; padding:2px 6px; border-radius:5px; background:#00000012; }
+  .closed { color:var(--warn); }
+  #pane { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
+  .msg { max-width:70%; padding:8px 12px; border-radius:12px; background:#0000000f; }
+  .msg.outbound { align-self:flex-end; background:var(--accent); color:#fff; }
+  .msg .meta { font-size:10px; opacity:.75; margin-top:3px; }
+  .msg.failed { outline:1px solid #dc2626; }
+  #composer { border-top:1px solid var(--line); padding:12px; display:flex; gap:8px; }
+  #composer input { flex:1; }
+  #empty { margin:auto; color:var(--muted); }
+  #warn { padding:7px 14px; font-size:12px; color:var(--warn); background:#b4530912; }
+  dialog { border:1px solid var(--line); border-radius:12px; padding:20px; min-width:340px; background:Canvas; color:CanvasText; }
+  dialog::backdrop { background:#0006; }
+  dialog h3 { margin:0 0 14px; font-size:14px; }
+  .field { margin-bottom:11px; }
+  .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .field input, .field select { width:100%; }
+  .help { font-size:11px; color:var(--muted); margin-top:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Inbox</h1>
+  <select id="orgSelect"></select>
+  <button id="newConv">New conversation</button>
+  <nav style="margin-left:auto">
+    <a href="/">Settings</a>
+    <a href="/inbox" class="on">Inbox</a>
+  </nav>
+</header>
+
+<div id="body">
+  <div id="list"></div>
+  <div id="pane">
+    <div id="warn" hidden></div>
+    <div id="msgs"><div id="empty">Select a conversation</div></div>
+    <div id="composer">
+      <input id="text" placeholder="Reply…" />
+      <button id="send">Send</button>
+    </div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <h3>Start a conversation</h3>
+  <div class="field">
+    <label>Channel</label>
+    <select id="dlgAccount"></select>
+  </div>
+  <div class="field">
+    <label>Recipient</label>
+    <input id="dlgTo" placeholder="PSID / LINE user ID / phone / email" />
+    <div class="help" id="dlgHelp"></div>
+  </div>
+  <div class="field">
+    <label>Contact name <span style="opacity:.6">(optional)</span></label>
+    <input id="dlgName" placeholder="e.g. Rina" />
+  </div>
+  <div class="field">
+    <label>First message <span style="opacity:.6">(optional)</span></label>
+    <input id="dlgText" placeholder="Leave blank to just open the thread" />
+  </div>
+  <div class="row" style="justify-content:flex-end; gap:8px; margin-top:16px">
+    <button class="ghost" id="dlgCancel">Cancel</button>
+    <button id="dlgCreate">Create</button>
+  </div>
+</dialog>
+
+<script>
+let orgs = [], orgId = localStorage.getItem('orgId') || '';
+let accounts = [], convs = [], active = null;
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
+const PLACEHOLDER = {
+  messenger: 'Page-scoped ID (PSID), e.g. 1234567890',
+  instagram: 'Instagram-scoped user ID',
+  whatsapp:  'Phone in international format, e.g. 628123456789',
+  line:      'LINE user ID, starts with U…',
+  email:     'name@example.com',
+};
+
+async function loadOrgs() {
+  orgs = await api('/api/orgs');
+  if (!orgs.find(o => o.id === orgId)) orgId = orgs[0]?.id || '';
+  localStorage.setItem('orgId', orgId);
+  $('#orgSelect').innerHTML = orgs.map(o =>
+    `<option value="${o.id}" ${o.id === orgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
+}
+
+$('#orgSelect').onchange = async e => {
+  orgId = e.target.value;
+  localStorage.setItem('orgId', orgId);
+  active = null;
+  await loadAccounts(); await load();
+};
+
+async function loadAccounts() {
+  const data = await api(`/api/channels?org=${encodeURIComponent(orgId)}`);
+  accounts = data.accounts;
+}
+
+async function load() {
+  if (!orgId) return;
+  convs = await api(`/api/conversations?org=${encodeURIComponent(orgId)}`);
+  if (active && !convs.find(c => c.id === active)) active = null;
+  render();
+}
+
+function render() {
+  $('#list').innerHTML = convs.map(c => `
+    <div class="conv ${c.id === active ? 'active' : ''}" data-id="${c.id}">
+      <div class="row">
+        <span class="name">${esc(c.contact)}</span>
+        <span class="badge">${c.channel}</span>
+      </div>
+      <div class="preview">${esc(c.preview) || '<i>no messages yet</i>'}</div>
+      ${c.windowOpen ? '' : '<div class="preview closed">⚠ session window closed</div>'}
+    </div>`).join('') ||
+    '<div style="padding:16px;color:var(--muted)">No conversations. Start one, or run <code>make sim</code>.</div>';
+
+  document.querySelectorAll('.conv').forEach(el => el.onclick = () => { active = el.dataset.id; render(); });
+
+  const c = convs.find(x => x.id === active);
+  const msgs = $('#msgs'), warn = $('#warn');
+  if (!c) { msgs.innerHTML = '<div id="empty">Select a conversation</div>'; warn.hidden = true; return; }
+
+  warn.hidden = c.windowOpen;
+  warn.textContent = '⚠ Session window closed — only an approved template can reopen this conversation.';
+
+  msgs.innerHTML = c.messages.map(m => `
+    <div class="msg ${m.direction} ${m.status === 'failed' ? 'failed' : ''}">
+      <div>${esc(m.body) || '<i>[' + m.type + ']</i>'}</div>
+      <div class="meta">${new Date(m.createdAt).toLocaleTimeString()} · ${m.status}${m.error ? ' · ' + esc(m.error) : ''}</div>
+    </div>`).join('') || '<div id="empty">No messages yet — send the first one.</div>';
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function send() {
+  const input = $('#text');
+  if (!active || !input.value.trim()) return;
+  try {
+    const body = await api(`/api/conversations/${active}/reply`, {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ text: input.value }),
+    });
+    if (!body.ok) alert('Send blocked: ' + body.error);
+    input.value = '';
+  } catch (e) { alert('Send blocked: ' + e.message); }
+  load();
+}
+
+$('#send').onclick = send;
+$('#text').onkeydown = e => { if (e.key === 'Enter') send(); };
+
+// ---------- new conversation ----------
+$('#newConv').onclick = async () => {
+  await loadAccounts();
+  if (!accounts.length) { alert('Connect a channel first in Settings.'); return; }
+  $('#dlgAccount').innerHTML = accounts.map(a =>
+    `<option value="${a.id}" data-type="${a.channelType}">${esc(a.displayName)} — ${a.channelType}</option>`).join('');
+  updateHint();
+  $('#dlg').showModal();
+};
+
+function updateHint() {
+  const opt = $('#dlgAccount').selectedOptions[0];
+  const type = opt?.dataset.type;
+  $('#dlgTo').placeholder = PLACEHOLDER[type] || '';
+  const acc = accounts.find(a => a.id === $('#dlgAccount').value);
+  $('#dlgHelp').textContent = acc?.capabilities.hasSessionWindow
+    ? `${type} allows an outbound-first message only inside a ${acc.capabilities.sessionWindowHours}h window — otherwise a template is required.`
+    : `${type} allows messaging first at any time.`;
+}
+$('#dlgAccount').onchange = updateHint;
+
+$('#dlgCancel').onclick = () => $('#dlg').close();
+
+$('#dlgCreate').onclick = async () => {
+  try {
+    const res = await api('/api/conversations', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({
+        accountId: $('#dlgAccount').value,
+        to: $('#dlgTo').value,
+        name: $('#dlgName').value,
+        text: $('#dlgText').value,
+      }),
+    });
+    active = res.conversationId;
+    $('#dlg').close();
+    ['#dlgTo','#dlgName','#dlgText'].forEach(s => $(s).value = '');
+    await load();
+  } catch (e) {
+    // The conversation may still have been created; refresh either way.
+    alert(e.message);
+    await load();
+  }
+};
+
+(async () => { await loadOrgs(); await loadAccounts(); await load(); setInterval(load, 3000); })();
+</script>
+</body>
+</html>
