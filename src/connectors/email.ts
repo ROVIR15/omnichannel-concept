@@ -3,6 +3,7 @@
 // this connector accepts a provider-neutral shape so swapping is cheap.
 
 import type { ChannelConnector, NormalizedMessage, SendResult } from "../types";
+import { sendGmail } from "../integrations/gmail";
 
 export const emailConnector: ChannelConnector = {
   channelType: () => "email",
@@ -65,6 +66,8 @@ export const emailConnector: ChannelConnector = {
   },
 
   async send(account, out): Promise<SendResult> {
+    if (account.credentials.provider === "gmail") return sendGmail(account, out);
+
     const url = account.credentials.apiUrl;
     if (!url) {
       console.log(`[email] (no provider configured) would send to ${out.to}: ${out.body}`);

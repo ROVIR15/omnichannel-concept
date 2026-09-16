@@ -11,6 +11,9 @@ export const APP_SETTING_FIELDS: CredentialField[] = [
   { key: "meta_verify_token", label: "Meta Verify Token", secret: true, help: "Any random string — must match what you type into Meta's webhook form." },
   { key: "meta_graph_version", label: "Graph API Version", secret: false, help: "e.g. v21.0" },
   { key: "instagram_app_secret", label: "Instagram App Secret", secret: true, help: "Only if Instagram webhooks are signed separately — App Dashboard → Instagram → API setup." },
+  { key: "google_oauth_client_id", label: "Google OAuth Client ID", secret: false, help: "Google Cloud → APIs & Services → Credentials" },
+  { key: "google_oauth_client_secret", label: "Google OAuth Client Secret", secret: true, help: "Stored server-side and never returned to the browser." },
+  { key: "google_oauth_redirect_uri", label: "Google OAuth Redirect URI", secret: false, help: "Must exactly match Google Cloud, e.g. https://your-host/api/integrations/gmail/callback" },
 ];
 
 const ENV_FALLBACK: Record<string, string> = {
@@ -19,6 +22,9 @@ const ENV_FALLBACK: Record<string, string> = {
   meta_verify_token: "META_VERIFY_TOKEN",
   meta_graph_version: "META_GRAPH_VERSION",
   instagram_app_secret: "INSTAGRAM_APP_SECRET",
+  google_oauth_client_id: "GOOGLE_OAUTH_CLIENT_ID",
+  google_oauth_client_secret: "GOOGLE_OAUTH_CLIENT_SECRET",
+  google_oauth_redirect_uri: "GOOGLE_OAUTH_REDIRECT_URI",
 };
 
 export function appSetting(key: string): string {
