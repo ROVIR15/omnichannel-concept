@@ -8,6 +8,7 @@ import { seedIfEmpty } from "./seed";
 import { APP_SETTING_FIELDS, maskedAppSettings, saveAppSettings } from "./settings";
 import {
   completeGmailOAuth,
+  disconnectGmail,
   downloadGmailAttachment,
   gmailConnectionStatus,
   gmailConnectUrl,
@@ -246,6 +247,17 @@ const server = Bun.serve({
       const orgId = url.searchParams.get("org");
       if (!orgId) return json({ error: "org query parameter is required" }, 400);
       return json(gmailConnectionStatus(orgId));
+    }
+
+    if (path === "/api/integrations/gmail/disconnect" && method === "POST") {
+      const b = await body<{ orgId?: string }>(req);
+      if (!b?.orgId) return json({ error: "orgId is required" }, 400);
+      try {
+        await disconnectGmail(b.orgId);
+        return json({ ok: true });
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "Gmail logout failed" }, 400);
+      }
     }
 
     if (path === "/api/integrations/gmail/messages" && method === "GET") {

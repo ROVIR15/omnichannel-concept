@@ -90,6 +90,7 @@
   <button id="gmailCompose" hidden>Compose email</button>
   <button class="ghost" id="gmailConnect">Connect Gmail</button>
   <button class="ghost" id="gmailSync" hidden>Sync Gmail</button>
+  <button class="ghost" id="gmailLogout" hidden>Log out Gmail</button>
   <span id="gmailState"></span>
   <nav style="margin-left:auto">
     <a href="/">Settings</a>
@@ -320,6 +321,7 @@ async function loadGmailStatus() {
   $('#gmailConnect').textContent = gmail.connected ? 'Reconnect Gmail' : 'Connect Gmail';
   $('#gmailSync').hidden = !gmail.connected;
   $('#gmailCompose').hidden = !gmail.connected;
+  $('#gmailLogout').hidden = !gmail.connected;
   $('#gmailState').textContent = gmail.connected
     ? `Connected: ${gmail.emailAddress}`
     : (gmail.configured ? 'Gmail not connected' : 'Configure Google OAuth in Settings');
@@ -412,6 +414,23 @@ $('#gmailConnect').onclick = () => {
   location.href = `/api/integrations/gmail/connect?org=${encodeURIComponent(orgId)}`;
 };
 $('#gmailSync').onclick = syncGmail;
+$('#gmailLogout').onclick = async () => {
+  if (!confirm(`Log out ${gmail.emailAddress || 'this Gmail account'}? Existing inbox history will be kept.`)) return;
+  const button = $('#gmailLogout');
+  button.disabled = true;
+  try {
+    await api('/api/integrations/gmail/disconnect', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ orgId }),
+    });
+    await loadAccounts();
+    await loadGmailStatus();
+  } catch (e) {
+    alert('Gmail logout failed: ' + e.message);
+  } finally {
+    button.disabled = false;
+  }
+};
 $('#gmailCompose').onclick = () => $('#gmailDlg').showModal();
 $('#gmailCancel').onclick = () => $('#gmailDlg').close();
 $('#gmailSend').onclick = async () => {

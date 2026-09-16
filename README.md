@@ -143,6 +143,7 @@ the stored one untouched.
 | `GET/POST /api/channels`, `DELETE /api/channels/:id` | channel accounts |
 | `GET /api/integrations/gmail/connect`, `GET /api/integrations/gmail/callback` | Gmail OAuth flow |
 | `GET /api/integrations/gmail/status`, `GET /api/integrations/gmail/messages` | connection status and manual inbox sync |
+| `POST /api/integrations/gmail/disconnect` | revoke Gmail access and remove locally stored OAuth tokens |
 | `POST /api/integrations/gmail/send` | send a new email through the connected Gmail account |
 | `GET /api/integrations/gmail/attachments/:messageId/:attachmentId` | download an attachment from Gmail |
 | `GET /api/conversations?org=` | inbox data |

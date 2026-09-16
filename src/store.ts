@@ -113,6 +113,15 @@ export function deleteAccount(id: string) {
   q("DELETE FROM channel_accounts WHERE id = ?").run(id);
 }
 
+export function updateAccountConnection(
+  id: string,
+  credentials: Record<string, string>,
+  status: ChannelAccount["status"],
+) {
+  q("UPDATE channel_accounts SET credentials = ?, status = ? WHERE id = ?")
+    .run(JSON.stringify(credentials), status, id);
+}
+
 // ---------- contacts & identities ----------
 
 export function findIdentity(orgId: string, channelType: ChannelType, externalUserId: string) {

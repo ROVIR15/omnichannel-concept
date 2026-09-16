@@ -8,6 +8,7 @@ import {
   listAccounts,
   messageExists,
   resolveContact,
+  updateAccountConnection,
   updateMessageAttachments,
   upsertAccount,
 } from "../store";
@@ -140,6 +141,30 @@ export function gmailConnectionStatus(orgId: string) {
     emailAddress: account?.externalId ?? null,
     accountId: account?.id ?? null,
   };
+}
+
+export async function disconnectGmail(orgId: string): Promise<void> {
+  const account = gmailAccount(orgId);
+  if (!account) throw new Error("Gmail is not connected for this organisation");
+  const token = account.credentials.refreshToken || account.credentials.accessToken;
+
+  // Revocation is best-effort: local logout must still complete if Google is
+  // temporarily unavailable or the token was already revoked.
+  if (token) {
+    try {
+      const response = await fetch("https://oauth2.googleapis.com/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) console.warn(`[gmail] token revocation returned HTTP ${response.status}`);
+    } catch (error: unknown) {
+      console.warn("[gmail] token revocation failed", error instanceof Error ? error.message : error);
+    }
+  }
+
+  updateAccountConnection(account.id, { provider: "gmail" }, "revoked");
 }
 
 export function gmailConnectUrl(orgId: string): string {
