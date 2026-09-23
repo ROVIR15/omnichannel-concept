@@ -1,0 +1,448 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Permissions</title>
+  <link rel="stylesheet" href="/web/shell.css" />
+  <style>
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px 20px 64px;
+    }
+
+    h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      margin: 0 0 12px;
+    }
+
+    .top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 22px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .top input { max-width: 120px; }
+
+    .fieldopts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 10px; }
+    .fieldopts label { display: flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; }
+    .fieldopts input { width: auto; margin: 0; }
+
+    details.perm {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--card);
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+
+    details.perm>summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    details.perm>summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.perm>summary:hover {
+      background: #00000008;
+    }
+
+    details.perm[open]>summary {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .chev {
+      display: inline-block;
+      transition: transform .15s;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    details.perm[open]>summary .chev {
+      transform: rotate(90deg);
+    }
+
+    .perm-title {
+      font-weight: 650;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .perm-action {
+      font-size: 12px;
+      color: var(--muted);
+      margin-left: auto;
+    }
+
+    .perm-body {
+      padding: 16px;
+    }
+
+    .perm-desc {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    code.path {
+      display: block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      background: #00000010;
+      padding: 8px 10px;
+      border-radius: 6px;
+      overflow-x: auto;
+      white-space: pre;
+      margin-bottom: 12px;
+    }
+
+    .result {
+      margin-top: 12px;
+      font-size: 12px;
+      display: none;
+    }
+
+    .result.show {
+      display: block;
+    }
+
+    .result .code {
+      font-weight: 650;
+      margin-bottom: 6px;
+    }
+
+    .result .code.ok2 {
+      color: var(--ok);
+    }
+
+    .result .code.err2 {
+      color: var(--bad);
+    }
+
+    .result pre {
+      background: #00000010;
+      padding: 10px;
+      border-radius: 6px;
+      overflow-x: auto;
+      max-height: 260px;
+      margin: 0;
+    }
+  </style>
+</head>
+
+<body>
+
+  <main>
+    <div class="top">
+      <span id="tokenStatus">Access token: loading…</span>
+      <a href="/">Set it in Settings</a>
+      <span style="margin-left:auto">Graph version</span>
+      <input id="graphVersion" value="v26.0" placeholder="v26.0" />
+    </div>
+
+    <h2>Permissions</h2>
+    <div id="perms"></div>
+  </main>
+
+  <script src="/web/shell.js"></script>
+  <script>
+    // One card per permission from permission.md — each fires the Graph API call
+    // that exercises it and shows exactly what was sent and what came back.
+    const PERMISSIONS = [
+      {
+        key: 'public_profile',
+        title: 'public_profile',
+        action: 'GET /me',
+        desc: 'Requires 5 API test calls.',
+        path: '/me',
+        // Fields a public_profile-scoped token is actually allowed to read.
+        fieldOptions: [
+          { key: 'id', on: true }, { key: 'name', on: true },
+          { key: 'first_name', on: false }, { key: 'last_name', on: false },
+          { key: 'middle_name', on: false }, { key: 'short_name', on: false },
+          { key: 'name_format', on: false }, { key: 'picture', on: false },
+        ],
+        param: null,
+      },
+      {
+        key: 'pages_show_list',
+        title: 'pages_show_list',
+        action: 'GET /me/accounts',
+        desc: 'Requires 1 API test call. Fetches the Facebook Pages managed by the logged-in user.',
+        path: '/me/accounts',
+        fieldOptions: [
+          { key: 'id', on: true }, { key: 'name', on: true },
+          { key: 'access_token', on: false }, { key: 'category', on: false },
+          { key: 'category_list', on: false }, { key: 'tasks', on: false },
+          { key: 'picture', on: false },
+        ],
+        param: null,
+      },
+      {
+        key: 'instagram_basic',
+        title: 'instagram_basic',
+        action: 'GET /me/accounts',
+        desc: 'Requires 1 API test call. Verifies access to linked Instagram Professional accounts.',
+        path: '/me/accounts',
+        fieldOptions: [
+          { key: 'id', on: true }, { key: 'name', on: true },
+          { key: 'instagram_business_account', on: true },
+          { key: 'instagram_business_account{id,username,profile_picture_url,followers_count,media_count}', on: false },
+          { key: 'category', on: false },
+        ],
+        param: null,
+      },
+      {
+        key: 'business_management',
+        title: 'business_management',
+        action: 'GET /me/businesses',
+        desc: 'Requires 1 API test call. Fetches the Meta Business Portfolios (Business Managers) associated with your user account.',
+        path: '/me/businesses',
+        fieldOptions: [
+          { key: 'id', on: true }, { key: 'name', on: true },
+          { key: 'verification_status', on: false }, { key: 'primary_page', on: false },
+          { key: 'timezone_id', on: false }, { key: 'vertical', on: false },
+          { key: 'created_time', on: false },
+        ],
+        param: null,
+      },
+      {
+        key: 'whatsapp_business_management',
+        title: 'whatsapp_business_management',
+        action: 'GET /{waba-id}/phone_numbers',
+        desc: 'Requires 1 API test call. Retrieves the registered WhatsApp phone numbers associated with your WhatsApp Business Account ID. Alternative: GET /{waba-id}.',
+        path: '/{waba-id}/phone_numbers',
+        fieldOptions: [
+          { key: 'id', on: true }, { key: 'display_phone_number', on: true },
+          { key: 'verified_name', on: true }, { key: 'quality_rating', on: false },
+          { key: 'code_verification_status', on: false }, { key: 'platform_type', on: false },
+          { key: 'throughput', on: false },
+        ],
+        param: { key: 'wabaId', label: 'WhatsApp Business Account ID', placeholder: 'e.g. 102938475610293' },
+      },
+      {
+        key: 'pages_manage_metadata',
+        title: 'pages_manage_metadata',
+        action: 'POST /{page-id}/subscribed_apps',
+        desc: 'Requires 1 API test call. Subscribes your app to receive webhooks and manage metadata for a specific Facebook Page.',
+        path: '/{page-id}/subscribed_apps',
+        param: { key: 'pageId', label: 'Facebook Page ID', placeholder: 'e.g. 1092837465921' },
+        defaultBody: { subscribed_fields: 'messages,messaging_postbacks' },
+      },
+      {
+        key: 'human_agent',
+        title: 'Human Agent',
+        action: 'POST /{page-id}/messages',
+        desc: 'Requires 1 API test call. Allows human agents to respond to user inquiries within a 7-day window using the HUMAN_AGENT tag.',
+        path: '/{page-id}/messages',
+        param: { key: 'pageId', label: 'Facebook Page ID', placeholder: 'e.g. 1092837465921' },
+        defaultBody: {
+          recipient: { id: '<PSID>' },
+          messaging_type: 'MESSAGE_TAG',
+          tag: 'HUMAN_AGENT',
+          message: { text: 'Human agent test message' },
+        },
+      },
+      {
+        key: 'pages_messaging',
+        title: 'pages_messaging',
+        action: 'POST /{page-id}/messages',
+        desc: 'Requires 1 API test call. Enables your app to send and receive messages automatically on behalf of a Facebook Page.',
+        path: '/{page-id}/messages',
+        param: { key: 'pageId', label: 'Facebook Page ID', placeholder: 'e.g. 1092837465921' },
+        defaultBody: { recipient: { id: '<PSID>' }, message: { text: 'Hello from permissions test' } },
+      },
+      {
+        key: 'instagram_manage_messages',
+        title: 'instagram_manage_messages',
+        action: 'POST /{instagram-business-id}/messages',
+        desc: 'Requires 1 API test call. Allows reading and sending Instagram Direct Messages for a connected Instagram Business profile.',
+        path: '/{instagram-business-id}/messages',
+        param: { key: 'instagramBusinessId', label: 'Instagram Business Account ID', placeholder: 'e.g. 178414010247401' },
+        defaultBody: { recipient: { id: '<IGSID>' }, message: { text: 'Hello from permissions test' } },
+      },
+      {
+        key: 'whatsapp_business_messaging',
+        title: 'whatsapp_business_messaging',
+        action: 'POST /{phone-number-id}/messages',
+        desc: 'Requires 1 API test call. Sends a text template or message payload using the WhatsApp Cloud API via your active Phone Number ID.',
+        path: '/{phone-number-id}/messages',
+        param: { key: 'phoneNumberId', label: 'WhatsApp Phone Number ID', placeholder: 'e.g. 102938475610293' },
+        defaultBody: { messaging_product: 'whatsapp', to: '<E164 phone number>', type: 'text', text: { body: 'Hello from permissions test' } },
+      },
+
+    ];
+
+    let testToken = ''; // pulled from provider settings — see loadToken()
+
+    function graphVersion() { return ($('#graphVersion').value || 'v26.0').trim(); }
+    function token() { return testToken; }
+
+    function method(perm) { return perm.action.split(' ')[0]; }
+
+    function resolvePath(p, param) {
+      if (!param) return p;
+      const v = ($(`#${param.domId}`)?.value || '').trim();
+      // Path holds exactly one {placeholder} — swap whatever it's named for the input value.
+      return p.replace(/\{[^}]+\}/, v || p.match(/\{[^}]+\}/)?.[0] || '');
+    }
+
+    function fieldsFor(perm) {
+      if (!perm.fieldOptions) return '';
+      return $$(`[data-fieldopt="${perm.key}"]:checked`).map(el => el.value).join(',');
+    }
+
+    function buildUrl(perm) {
+      const fields = fieldsFor(perm);
+      const path = resolvePath(perm.path, perm.param);
+      const qs = new URLSearchParams();
+      if (fields) qs.set('fields', fields);
+      qs.set('access_token', token() || 'xxxx');
+      return `https://graph.facebook.com/${graphVersion()}${path}?${qs.toString()}`;
+    }
+
+    function bodyFor(perm) {
+      if (method(perm) !== 'POST') return null;
+      return ($(`#${perm.key}-body`)?.value ?? '').trim();
+    }
+
+    function curlFor(perm) {
+      const url = buildUrl(perm).replace(/access_token=[^&]*/, 'access_token=xxxx');
+      const m = method(perm);
+      if (m !== 'POST') return `curl -i -X GET \\\n "${url}"`;
+      const body = bodyFor(perm) || '{}';
+      return `curl -i -X POST \\\n "${url}" \\\n -H "Content-Type: application/json" \\\n -d '${body}'`;
+    }
+
+    function renderPerms() {
+      $('#perms').innerHTML = PERMISSIONS.map((perm, i) => {
+        const paramId = `${perm.key}-param`;
+        if (perm.param) perm.param.domId = paramId;
+        return `
+    <details class="perm" data-key="${perm.key}" ${i === 0 ? 'open' : ''}>
+      <summary>
+        <span class="chev" aria-hidden="true">▸</span>
+        <span class="perm-title">${i + 1}. ${esc(perm.title)}</span>
+        <span class="badge">${esc(perm.action)}</span>
+        <span class="perm-action">click to test</span>
+      </summary>
+      <div class="perm-body">
+        <div class="perm-desc">${esc(perm.desc)}</div>
+        ${perm.fieldOptions ? `
+        <div class="field">
+          <label>fields</label>
+          <div class="fieldopts">
+            ${perm.fieldOptions.map((f, fi) => `
+            <label>
+              <input type="checkbox" data-fieldopt="${perm.key}" value="${esc(f.key)}" id="${perm.key}-f${fi}" ${f.on ? 'checked' : ''} />
+              ${esc(f.key)}
+            </label>`).join('')}
+          </div>
+        </div>` : ''}
+        ${perm.param ? `
+        <div class="grid">
+          <div class="field">
+            <label>${esc(perm.param.label)}</label>
+            <input id="${paramId}" placeholder="${esc(perm.param.placeholder)}" />
+          </div>
+        </div>` : ''}
+        ${perm.defaultBody ? `
+        <div class="field">
+          <label>JSON body</label>
+          <textarea id="${perm.key}-body" rows="5" style="width:100%; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;">${esc(JSON.stringify(perm.defaultBody, null, 2))}</textarea>
+        </div>` : ''}
+        <code class="path" id="${perm.key}-curl"></code>
+        <button data-run="${perm.key}">Run test</button>
+        <div class="result" id="${perm.key}-result">
+          <div class="code" id="${perm.key}-code"></div>
+          <pre id="${perm.key}-out"></pre>
+        </div>
+      </div>
+    </details>`;
+      }).join('');
+
+      PERMISSIONS.forEach(perm => {
+        const update = () => { $(`#${perm.key}-curl`).textContent = curlFor(perm); };
+        $$(`[data-fieldopt="${perm.key}"]`).forEach(cb => cb.addEventListener('change', update));
+        if ($(`#${perm.key}-body`)) $(`#${perm.key}-body`).addEventListener('input', update);
+        if (perm.param) $(`#${perm.param.domId}`).addEventListener('input', update);
+        update();
+        $(`[data-run="${perm.key}"]`).onclick = () => runTest(perm);
+      });
+    }
+
+    async function runTest(perm) {
+      if (perm.param && !$(`#${perm.param.domId}`).value.trim()) {
+        alert(`${perm.param.label} is required for this test.`);
+        return;
+      }
+      if (!token()) { alert('No access token set — add one in Settings first.'); return; }
+
+      const resultBox = $(`#${perm.key}-result`);
+      const codeBox = $(`#${perm.key}-code`);
+      const outBox = $(`#${perm.key}-out`);
+      resultBox.className = 'result show';
+      codeBox.className = 'code';
+      codeBox.textContent = 'Running…';
+      outBox.textContent = '';
+
+      try {
+        const m = method(perm);
+        let opts;
+        if (m === 'POST') {
+          let body;
+          try { body = JSON.parse(bodyFor(perm) || '{}'); }
+          catch { throw new Error('JSON body is not valid JSON'); }
+          opts = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
+        }
+        const res = await fetch(buildUrl(perm), opts);
+        const text = await res.text();
+        let pretty = text;
+        try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { }
+        codeBox.className = 'code ' + (res.ok ? 'ok2' : 'err2');
+        codeBox.textContent = `HTTP ${res.status}`;
+        outBox.textContent = pretty;
+      } catch (e) {
+        codeBox.className = 'code err2';
+        codeBox.textContent = 'Request failed';
+        outBox.textContent = e.message;
+      }
+    }
+
+    $('#graphVersion').addEventListener('input', () => PERMISSIONS.forEach(p => {
+      $(`#${p.key}-curl`).textContent = curlFor(p);
+    }));
+
+    async function loadToken() {
+      const settings = await api('/api/settings');
+      testToken = settings.find(f => f.key === 'meta_test_access_token')?.value || '';
+      const version = settings.find(f => f.key === 'meta_graph_version')?.value;
+      if (version) $('#graphVersion').value = version;
+      $('#tokenStatus').innerHTML = testToken
+        ? 'Access token: <span class="badge active">set</span>'
+        : 'Access token: <span class="badge pending">not set</span>';
+      PERMISSIONS.forEach(p => { if ($(`#${p.key}-curl`)) $(`#${p.key}-curl`).textContent = curlFor(p); });
+    }
+
+    (async () => {
+      await mountShell({ active: '/permissions' });
+      renderPerms();
+      await loadToken();
+    })();
+  </script>
+</body>
+
+</html>

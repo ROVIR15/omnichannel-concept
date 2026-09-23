@@ -12,6 +12,7 @@ export const APP_SETTING_FIELDS: CredentialField[] = [
   { key: "meta_login_config_id", label: "Facebook Login Config ID", secret: false, help: "Facebook Login for Business → Configurations. Blank = classic scopes are requested instead." },
   { key: "meta_oauth_redirect_uri", label: "Facebook OAuth Redirect URI", secret: false, help: "Must be HTTPS and listed under Valid OAuth Redirect URIs, e.g. https://<tunnel>/api/integrations/facebook/callback. Blank = derived from the request." },
   { key: "meta_graph_version", label: "Graph API Version", secret: false, help: "e.g. v21.0" },
+  { key: "meta_test_access_token", label: "Graph API Test Access Token", secret: false, help: "Used by the Permissions test page to call the Graph API directly from the browser. A manual testing token, not a client credential — do not use a long-lived production token here." },
   { key: "instagram_app_secret", label: "Instagram App Secret", secret: true, help: "Only if Instagram webhooks are signed separately — App Dashboard → Instagram → API setup." },
   { key: "google_oauth_client_id", label: "Google OAuth Client ID", secret: false, help: "Google Cloud → APIs & Services → Credentials" },
   { key: "google_oauth_client_secret", label: "Google OAuth Client Secret", secret: true, help: "Stored server-side and never returned to the browser." },
