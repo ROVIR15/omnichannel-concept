@@ -6,8 +6,9 @@ import {
   accountByExternal, addMessage, findOrCreateConversation, getAccount, getContact,
   getConversation, identityFor, listConversations, messageExists, messagesOf,
   resolveContact, updateMessage,
+  updateConversationThread,
 } from "./store";
-import type { NormalizedMessage } from "./types";
+import type { Attachment, NormalizedMessage } from "./types";
 
 export interface IngestResult { accepted: number; duplicates: number; skipped: number }
 
@@ -90,20 +91,27 @@ export function checkSendable(conversationId: string, text: string) {
   return { ok: true as const, conv, account };
 }
 
-export async function reply(conversationId: string, text: string) {
+export async function reply(conversationId: string, text: string, attachments: Attachment[] = []) {
   const check = checkSendable(conversationId, text);
   if (!check.ok) return { ok: false, error: check.reason };
 
   const { conv, account } = check;
+  if (attachments.length && !(account.channelType === "email" && account.credentials.provider === "gmail")) {
+    return { ok: false, error: "attachments are currently supported only for Gmail" };
+  }
   const identity = identityFor(conv.contact_id, conv.channel_type);
   if (!identity) return { ok: false, error: "no channel identity for contact" };
+  const previous = messagesOf(conv.id).filter((message) => message.direction === "inbound").at(-1);
+  const references = [previous?.references_header, previous?.rfc_message_id].filter(Boolean).join(" ");
 
   const pending = addMessage({
     conversationId: conv.id,
     direction: "outbound",
     type: "text",
     body: text,
-    attachments: [],
+    attachments: attachments.map(({ data: _data, ...attachment }) => attachment),
+    sender: account.externalId,
+    recipient: identity.external_user_id,
     status: "queued",
   })!;
 
@@ -111,7 +119,13 @@ export async function reply(conversationId: string, text: string) {
     to: identity.external_user_id,
     type: "text",
     body: text,
+    subject: conv.subject
+      ? ((previous || conv.thread_hint) && !/^re:/i.test(conv.subject) ? `Re: ${conv.subject}` : conv.subject)
+      : undefined,
     threadHint: conv.thread_hint ?? undefined,
+    inReplyTo: previous?.rfc_message_id ?? undefined,
+    references: references || undefined,
+    attachments,
   });
 
   updateMessage(pending.id, {
@@ -119,8 +133,15 @@ export async function reply(conversationId: string, text: string) {
     error: res.error,
     externalMessageId: res.externalMessageId,
   });
+  if (res.threadId && !conv.thread_hint) updateConversationThread(conv.id, res.threadId);
 
-  return { ok: res.ok, error: res.error, conversationId: conv.id };
+  return {
+    ok: res.ok,
+    error: res.error,
+    conversationId: conv.id,
+    externalMessageId: res.externalMessageId,
+    threadId: res.threadId,
+  };
 }
 
 /** Agent-initiated conversation. Note it deliberately skips checkSendable's
@@ -128,6 +149,7 @@ export async function reply(conversationId: string, text: string) {
  *  outbound-first message legitimately requires a template. */
 export async function startConversation(opts: {
   accountId: string; to: string; name?: string; subject?: string; text?: string;
+  attachments?: Attachment[];
 }) {
   const account = getAccount(opts.accountId);
   if (!account) return { ok: false as const, error: "channel account not found" };
@@ -148,7 +170,7 @@ export async function startConversation(opts: {
     subject: opts.subject,
   });
 
-  if (!opts.text?.trim()) return { ok: true as const, conversationId: conv.id };
+  if (!opts.text?.trim() && !opts.attachments?.length) return { ok: true as const, conversationId: conv.id };
 
   const caps = connectorFor(account.channelType).capabilities();
   if (caps.hasSessionWindow && !conv.last_inbound_at) {
@@ -160,7 +182,7 @@ export async function startConversation(opts: {
     };
   }
 
-  const sent = await reply(conv.id, opts.text);
+  const sent = await reply(conv.id, opts.text ?? "", opts.attachments);
   return { ...sent, conversationId: conv.id };
 }
 
@@ -175,9 +197,12 @@ export function inbox(orgId: string) {
 
     return {
       id: c.id,
+      accountId: c.account_id,
       channel: c.channel_type,
       contact: getContact(c.contact_id)?.display_name ?? "unknown",
       status: c.status,
+      subject: c.subject,
+      threadId: c.thread_hint,
       windowOpen,
       lastMessageAt: c.last_message_at,
       preview: msgs.at(-1)?.body.slice(0, 80) ?? "",
@@ -188,6 +213,10 @@ export function inbox(orgId: string) {
         type: m.type,
         status: m.status,
         error: m.error,
+        sender: m.sender,
+        recipient: m.recipient,
+        externalMessageId: m.external_message_id,
+        attachments: JSON.parse(m.attachments || "[]") as Attachment[],
         createdAt: m.created_at,
       })),
     };

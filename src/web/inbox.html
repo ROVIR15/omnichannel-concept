@@ -12,8 +12,9 @@
   header h1 { font-size:15px; margin:0; font-weight:700; }
   nav a { color:var(--muted); text-decoration:none; margin-left:14px; font-size:13px; }
   nav a.on, nav a:hover { color:var(--accent); }
-  select, input { padding:7px 9px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
+  select, input, textarea { padding:7px 9px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
   button { padding:7px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; font:inherit; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
   button.ghost { background:transparent; border:1px solid var(--line); color:inherit; }
   #body { flex:1; display:flex; min-height:0; }
   #list { width:320px; border-right:1px solid var(--line); overflow-y:auto; }
@@ -26,22 +27,59 @@
   .badge { font-size:10px; text-transform:uppercase; letter-spacing:.05em; padding:2px 6px; border-radius:5px; background:#00000012; }
   .closed { color:var(--warn); }
   #pane { flex:1; display:flex; flex-direction:column; min-width:0; }
-  #msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
-  .msg { max-width:70%; padding:8px 12px; border-radius:12px; background:#0000000f; }
+  #msgs { flex:1; overflow-y:auto; padding:22px; display:flex; flex-direction:column; gap:14px; background:#00000004; }
+  .msg { flex:0 0 auto; min-height:min-content; max-width:70%; padding:8px 12px; border-radius:12px; background:#0000000f; white-space:pre-wrap; }
   .msg.outbound { align-self:flex-end; background:var(--accent); color:#fff; }
   .msg .meta { font-size:10px; opacity:.75; margin-top:3px; }
   .msg.failed { outline:1px solid #dc2626; }
+  .msg.email { width:min(760px, 92%); max-width:92%; height:max-content; min-height:max-content; padding:0; overflow:hidden; white-space:normal; border:1px solid var(--line); border-radius:16px; background:Canvas; color:CanvasText; box-shadow:0 3px 14px #0000000b; }
+  .msg.email.inbound { align-self:flex-start; }
+  .msg.email.outbound { align-self:flex-end; background:color-mix(in srgb, var(--accent) 7%, Canvas); color:CanvasText; }
+  .email-header { display:flex; align-items:flex-start; gap:10px; padding:12px 14px; border-bottom:1px solid var(--line); }
+  .email-avatar { width:34px; height:34px; flex:0 0 34px; display:grid; place-items:center; border-radius:50%; background:color-mix(in srgb, var(--accent) 14%, Canvas); color:var(--accent); font-weight:750; }
+  .email-heading { flex:1; min-width:0; }
+  .email-sender { font-weight:680; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .email-route { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+  .email-status { color:var(--muted); font-size:10px; text-align:right; white-space:nowrap; }
+  .email-body { padding:15px 16px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .quoted-mail { margin-top:14px; padding-top:10px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+  .quoted-mail summary { cursor:pointer; color:var(--accent); user-select:none; }
+  .quoted-mail-content { margin-top:8px; padding-left:10px; border-left:3px solid var(--line); white-space:pre-wrap; }
   #composer { border-top:1px solid var(--line); padding:12px; display:flex; gap:8px; }
-  #composer input { flex:1; }
+  #composer #text { flex:1; }
+  .file-button { padding:7px 12px; border:1px solid var(--line); border-radius:8px; cursor:pointer; white-space:nowrap; }
+  .file-button input { display:none; }
+  .attachments { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .attachment { display:inline-block; padding:3px 7px; border:1px solid currentColor; border-radius:6px; font-size:11px; color:inherit; text-decoration:none; }
+  .email .attachments { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); padding:0 16px 16px; margin:0; }
+  .attachment-card { min-width:0; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:#00000005; }
+  .attachment-preview { position:relative; display:grid; place-items:center; min-height:150px; max-height:260px; overflow:hidden; background:repeating-conic-gradient(#00000008 0 25%, transparent 0 50%) 50% / 16px 16px; }
+  .attachment-preview img { display:block; width:100%; max-height:260px; object-fit:contain; }
+  .attachment-preview-fallback { padding:30px 12px; color:var(--muted); font-size:12px; }
+  .attachment-detail { display:flex; align-items:center; gap:8px; padding:9px 10px; border-top:1px solid var(--line); }
+  .attachment-icon { font-size:18px; }
+  .attachment-copy { min-width:0; flex:1; }
+  .attachment-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:620; }
+  .attachment-size { color:var(--muted); font-size:10px; }
+  .attachment-actions { display:flex; gap:5px; }
+  .attachment-actions a { padding:4px 7px; border:1px solid var(--line); border-radius:6px; color:var(--accent); text-decoration:none; font-size:10px; }
   #empty { margin:auto; color:var(--muted); }
   #warn { padding:7px 14px; font-size:12px; color:var(--warn); background:#b4530912; }
+  #convInfo { padding:10px 16px; border-bottom:1px solid var(--line); }
+  #gmailState { font-size:12px; color:var(--muted); }
   dialog { border:1px solid var(--line); border-radius:12px; padding:20px; min-width:340px; background:Canvas; color:CanvasText; }
   dialog::backdrop { background:#0006; }
   dialog h3 { margin:0 0 14px; font-size:14px; }
   .field { margin-bottom:11px; }
   .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
-  .field input, .field select { width:100%; }
+  .field input, .field select, .field textarea { width:100%; }
   .help { font-size:11px; color:var(--muted); margin-top:4px; }
+  @media (max-width:700px) {
+    #list { width:270px; }
+    #msgs { padding:12px; }
+    .msg, .msg.email { width:96%; max-width:96%; }
+    .email .attachments { grid-template-columns:1fr; }
+  }
 </style>
 </head>
 <body>
@@ -49,6 +87,11 @@
   <h1>Inbox</h1>
   <select id="orgSelect"></select>
   <button id="newConv">New conversation</button>
+  <button id="gmailCompose" hidden>Compose email</button>
+  <button class="ghost" id="gmailConnect">Connect Gmail</button>
+  <button class="ghost" id="gmailSync" hidden>Sync Gmail</button>
+  <button class="ghost" id="gmailLogout" hidden>Log out Gmail</button>
+  <span id="gmailState"></span>
   <nav style="margin-left:auto">
     <a href="/">Settings</a>
     <a href="/inbox" class="on">Inbox</a>
@@ -59,9 +102,11 @@
   <div id="list"></div>
   <div id="pane">
     <div id="warn" hidden></div>
+    <div id="convInfo" hidden></div>
     <div id="msgs"><div id="empty">Select a conversation</div></div>
     <div id="composer">
       <input id="text" placeholder="Reply…" />
+      <label class="file-button" id="replyAttach" hidden><span id="replyFileLabel">Attach</span><input id="replyFiles" type="file" multiple /></label>
       <button id="send">Send</button>
     </div>
   </div>
@@ -92,9 +137,34 @@
   </div>
 </dialog>
 
+<dialog id="gmailDlg">
+  <h3>New email</h3>
+  <div class="field">
+    <label>To</label>
+    <input id="gmailTo" type="email" placeholder="customer@example.com" />
+  </div>
+  <div class="field">
+    <label>Subject</label>
+    <input id="gmailSubject" placeholder="Gmail Integration Test" />
+  </div>
+  <div class="field">
+    <label>Message</label>
+    <textarea id="gmailBody" rows="8" placeholder="Hello from Omnichannel"></textarea>
+  </div>
+  <div class="field">
+    <label>Attachments <span style="opacity:.6">(10 MB each, 20 MB total)</span></label>
+    <input id="gmailFiles" type="file" multiple />
+  </div>
+  <div class="row" style="justify-content:flex-end; gap:8px; margin-top:16px">
+    <button class="ghost" id="gmailCancel">Cancel</button>
+    <button id="gmailSend">Send</button>
+  </div>
+</dialog>
+
 <script>
-let orgs = [], orgId = localStorage.getItem('orgId') || '';
-let accounts = [], convs = [], active = null;
+const query = new URLSearchParams(location.search);
+let orgs = [], orgId = query.get('org') || localStorage.getItem('orgId') || '';
+let accounts = [], convs = [], active = null, gmail = { configured:false, connected:false };
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -104,6 +174,111 @@ async function api(path, opts) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
   return body;
+}
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_FILE_BYTES = 20 * 1024 * 1024;
+
+function bytesToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+async function filesToAttachments(input) {
+  const files = [...input.files];
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  const tooLarge = files.find(file => file.size > MAX_FILE_BYTES);
+  if (tooLarge) throw new Error(`${tooLarge.name} exceeds the 10 MB limit`);
+  if (total > MAX_TOTAL_FILE_BYTES) throw new Error('Attachments exceed the 20 MB total limit');
+  return Promise.all(files.map(async file => ({
+    type: 'file',
+    name: file.name,
+    mimeType: file.type || 'application/octet-stream',
+    size: file.size,
+    data: bytesToBase64(await file.arrayBuffer()),
+  })));
+}
+
+function formatBytes(size) {
+  if (!Number.isFinite(size)) return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function attachmentHtml(conversation, message, attachment) {
+  const detail = attachment.size ? ` · ${formatBytes(attachment.size)}` : '';
+  const label = `📎 ${attachment.name || 'attachment'}${detail}`;
+  if (conversation.channel === 'email' && message.externalMessageId && attachment.id) {
+    const base = `/api/integrations/gmail/attachments/${encodeURIComponent(message.externalMessageId)}/${encodeURIComponent(attachment.id)}?org=${encodeURIComponent(orgId)}&name=${encodeURIComponent(attachment.name || '')}`;
+    const viewHref = base + '&inline=1';
+    const previewable = ['image/png','image/jpeg','image/gif','image/webp','image/avif','image/bmp'].includes((attachment.mimeType || '').toLowerCase());
+    const canView = previewable || (attachment.mimeType || '').toLowerCase() === 'application/pdf';
+    return `<div class="attachment-card">
+      ${previewable ? `<a class="attachment-preview" href="${esc(viewHref)}" target="_blank" rel="noopener">
+        <img src="${esc(viewHref)}" alt="Preview of ${esc(attachment.name || 'attachment')}" loading="lazy"
+             onerror="this.hidden=true;this.nextElementSibling.hidden=false" />
+        <span class="attachment-preview-fallback" hidden>Preview unavailable</span>
+      </a>` : ''}
+      <div class="attachment-detail">
+        <span class="attachment-icon">📎</span>
+        <div class="attachment-copy">
+          <div class="attachment-name" title="${esc(attachment.name || 'attachment')}">${esc(attachment.name || 'attachment')}</div>
+          <div class="attachment-size">${esc(attachment.mimeType || 'file')}${detail}</div>
+        </div>
+        <div class="attachment-actions">
+          ${canView ? `<a href="${esc(viewHref)}" target="_blank" rel="noopener">View</a>` : ''}
+          <a href="${esc(base)}" download>Download</a>
+        </div>
+      </div>
+    </div>`;
+  }
+  return `<span class="attachment">${esc(label)}</span>`;
+}
+
+function emailBodyHtml(body) {
+  const lines = String(body || '').split('\n');
+  const quoteAt = lines.findIndex(line => /^On .+wrote:\s*$/i.test(line.trim()));
+  if (quoteAt > 0) {
+    const current = lines.slice(0, quoteAt).join('\n').trim();
+    const quoted = lines.slice(quoteAt).join('\n').trim();
+    return `${esc(current)}<details class="quoted-mail"><summary>Show quoted message</summary><div class="quoted-mail-content">${esc(quoted)}</div></details>`;
+  }
+  return esc(body) || '<i>No message body</i>';
+}
+
+function renderMessage(conversation, message) {
+  if (conversation.channel !== 'email') {
+    return `<div class="msg ${message.direction} ${message.status === 'failed' ? 'failed' : ''}">
+      <div>${esc(message.body) || '<i>[' + message.type + ']</i>'}</div>
+      ${message.attachments?.length ? `<div class="attachments">${message.attachments.map(a => attachmentHtml(conversation, message, a)).join('')}</div>` : ''}
+      <div class="meta">${new Date(message.createdAt).toLocaleString()} · ${message.status}${message.error ? ' · ' + esc(message.error) : ''}</div>
+    </div>`;
+  }
+
+  const sender = message.sender || (message.direction === 'outbound' ? gmail.emailAddress : conversation.contact) || 'Unknown sender';
+  const recipient = message.recipient || '';
+  const initial = sender.trim().charAt(0).toUpperCase() || '✉';
+  const technicalTitle = message.externalMessageId ? `Gmail message ID: ${message.externalMessageId}` : '';
+  return `<article class="msg email ${message.direction} ${message.status === 'failed' ? 'failed' : ''}">
+    <div class="email-header">
+      <div class="email-avatar">${esc(initial)}</div>
+      <div class="email-heading">
+        <div class="email-sender">${esc(sender)}</div>
+        ${recipient ? `<div class="email-route">to ${esc(recipient)}</div>` : ''}
+      </div>
+      <div class="email-status" title="${esc(technicalTitle)}">
+        <div>${new Date(message.createdAt).toLocaleString()}</div>
+        <div>${esc(message.status)}${message.error ? ' · ' + esc(message.error) : ''}</div>
+      </div>
+    </div>
+    <div class="email-body">${emailBodyHtml(message.body)}</div>
+    ${message.attachments?.length ? `<div class="attachments">${message.attachments.map(a => attachmentHtml(conversation, message, a)).join('')}</div>` : ''}
+  </article>`;
 }
 
 const PLACEHOLDER = {
@@ -126,7 +301,7 @@ $('#orgSelect').onchange = async e => {
   orgId = e.target.value;
   localStorage.setItem('orgId', orgId);
   active = null;
-  await loadAccounts(); await load();
+  await loadAccounts(); await loadGmailStatus(); await load();
 };
 
 async function loadAccounts() {
@@ -141,6 +316,33 @@ async function load() {
   render();
 }
 
+async function loadGmailStatus() {
+  gmail = await api(`/api/integrations/gmail/status?org=${encodeURIComponent(orgId)}`);
+  $('#gmailConnect').textContent = gmail.connected ? 'Reconnect Gmail' : 'Connect Gmail';
+  $('#gmailSync').hidden = !gmail.connected;
+  $('#gmailCompose').hidden = !gmail.connected;
+  $('#gmailLogout').hidden = !gmail.connected;
+  $('#gmailState').textContent = gmail.connected
+    ? `Connected: ${gmail.emailAddress}`
+    : (gmail.configured ? 'Gmail not connected' : 'Configure Google OAuth in Settings');
+}
+
+async function syncGmail() {
+  const button = $('#gmailSync');
+  button.disabled = true;
+  button.textContent = 'Syncing…';
+  try {
+    const result = await api(`/api/integrations/gmail/messages?org=${encodeURIComponent(orgId)}`);
+    await load();
+    if (result.synced) alert(`Added ${result.synced} Gmail message${result.synced === 1 ? '' : 's'} to the inbox.`);
+  } catch (e) {
+    alert('Gmail sync failed: ' + e.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Sync Gmail';
+  }
+}
+
 function render() {
   $('#list').innerHTML = convs.map(c => `
     <div class="conv ${c.id === active ? 'active' : ''}" data-id="${c.id}">
@@ -149,6 +351,7 @@ function render() {
         <span class="badge">${c.channel}</span>
       </div>
       <div class="preview">${esc(c.preview) || '<i>no messages yet</i>'}</div>
+      ${c.subject ? `<div class="preview">${esc(c.subject)}</div>` : ''}
       ${c.windowOpen ? '' : '<div class="preview closed">⚠ session window closed</div>'}
     </div>`).join('') ||
     '<div style="padding:16px;color:var(--muted)">No conversations. Start one, or run <code>make sim</code>.</div>';
@@ -156,36 +359,105 @@ function render() {
   document.querySelectorAll('.conv').forEach(el => el.onclick = () => { active = el.dataset.id; render(); });
 
   const c = convs.find(x => x.id === active);
-  const msgs = $('#msgs'), warn = $('#warn');
-  if (!c) { msgs.innerHTML = '<div id="empty">Select a conversation</div>'; warn.hidden = true; return; }
+  const msgs = $('#msgs'), warn = $('#warn'), info = $('#convInfo');
+  if (!c) {
+    msgs.innerHTML = '<div id="empty">Select a conversation</div>';
+    warn.hidden = true; info.hidden = true; $('#replyAttach').hidden = true;
+    return;
+  }
+
+  $('#replyAttach').hidden = c.accountId !== gmail.accountId;
+  if ($('#replyAttach').hidden) {
+    $('#replyFiles').value = '';
+    $('#replyFileLabel').textContent = 'Attach';
+  }
+
+  info.hidden = !c.subject;
+  info.innerHTML = c.subject
+    ? `<strong>${esc(c.subject)}</strong>${c.channel === 'email' ? '<div class="help">Email conversation</div>' : ''}`
+    : '';
 
   warn.hidden = c.windowOpen;
   warn.textContent = '⚠ Session window closed — only an approved template can reopen this conversation.';
 
-  msgs.innerHTML = c.messages.map(m => `
-    <div class="msg ${m.direction} ${m.status === 'failed' ? 'failed' : ''}">
-      <div>${esc(m.body) || '<i>[' + m.type + ']</i>'}</div>
-      <div class="meta">${new Date(m.createdAt).toLocaleTimeString()} · ${m.status}${m.error ? ' · ' + esc(m.error) : ''}</div>
-    </div>`).join('') || '<div id="empty">No messages yet — send the first one.</div>';
+  msgs.innerHTML = c.messages.map(m => renderMessage(c, m)).join('') || '<div id="empty">No messages yet — send the first one.</div>';
   msgs.scrollTop = msgs.scrollHeight;
 }
 
 async function send() {
   const input = $('#text');
-  if (!active || !input.value.trim()) return;
+  if (!active || (!input.value.trim() && !$('#replyFiles').files.length)) return;
   try {
+    const attachments = await filesToAttachments($('#replyFiles'));
     const body = await api(`/api/conversations/${active}/reply`, {
       method:'POST', headers:{'content-type':'application/json'},
-      body: JSON.stringify({ text: input.value }),
+      body: JSON.stringify({ text: input.value, attachments }),
     });
     if (!body.ok) alert('Send blocked: ' + body.error);
     input.value = '';
+    $('#replyFiles').value = '';
+    $('#replyFileLabel').textContent = 'Attach';
   } catch (e) { alert('Send blocked: ' + e.message); }
   load();
 }
 
 $('#send').onclick = send;
 $('#text').onkeydown = e => { if (e.key === 'Enter') send(); };
+$('#replyFiles').onchange = e => {
+  const count = e.target.files.length;
+  $('#replyFileLabel').textContent = count ? `${count} file${count === 1 ? '' : 's'}` : 'Attach';
+};
+
+// ---------- Gmail ----------
+$('#gmailConnect').onclick = () => {
+  if (!gmail.configured) { alert('Save the Google OAuth values in Settings first.'); return; }
+  location.href = `/api/integrations/gmail/connect?org=${encodeURIComponent(orgId)}`;
+};
+$('#gmailSync').onclick = syncGmail;
+$('#gmailLogout').onclick = async () => {
+  if (!confirm(`Log out ${gmail.emailAddress || 'this Gmail account'}? Existing inbox history will be kept.`)) return;
+  const button = $('#gmailLogout');
+  button.disabled = true;
+  try {
+    await api('/api/integrations/gmail/disconnect', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ orgId }),
+    });
+    await loadAccounts();
+    await loadGmailStatus();
+  } catch (e) {
+    alert('Gmail logout failed: ' + e.message);
+  } finally {
+    button.disabled = false;
+  }
+};
+$('#gmailCompose').onclick = () => $('#gmailDlg').showModal();
+$('#gmailCancel').onclick = () => $('#gmailDlg').close();
+$('#gmailSend').onclick = async () => {
+  const button = $('#gmailSend');
+  button.disabled = true;
+  try {
+    const attachments = await filesToAttachments($('#gmailFiles'));
+    const result = await api('/api/integrations/gmail/send', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({
+        orgId,
+        to: $('#gmailTo').value,
+        subject: $('#gmailSubject').value,
+        bodyText: $('#gmailBody').value,
+        attachments,
+      }),
+    });
+    active = result.conversationId;
+    $('#gmailDlg').close();
+    ['#gmailTo','#gmailSubject','#gmailBody','#gmailFiles'].forEach(s => $(s).value = '');
+    await load();
+  } catch (e) {
+    alert('Email send failed: ' + e.message);
+  } finally {
+    button.disabled = false;
+  }
+};
 
 // ---------- new conversation ----------
 $('#newConv').onclick = async () => {
@@ -232,7 +504,14 @@ $('#dlgCreate').onclick = async () => {
   }
 };
 
-(async () => { await loadOrgs(); await loadAccounts(); await load(); setInterval(load, 3000); })();
+(async () => {
+  await loadOrgs(); await loadAccounts(); await loadGmailStatus();
+  if (query.get('gmail_error')) alert('Gmail connection failed: ' + query.get('gmail_error'));
+  if (query.get('gmail') === 'connected') await syncGmail();
+  await load();
+  if (location.search) history.replaceState({}, '', '/inbox');
+  setInterval(load, 3000);
+})();
 </script>
 </body>
 </html>

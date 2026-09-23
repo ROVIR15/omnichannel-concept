@@ -7,10 +7,18 @@ import { connectorFor } from "./registry";
 import { seedIfEmpty } from "./seed";
 import { APP_SETTING_FIELDS, maskedAppSettings, saveAppSettings } from "./settings";
 import {
+  completeGmailOAuth,
+  disconnectGmail,
+  downloadGmailAttachment,
+  gmailConnectionStatus,
+  gmailConnectUrl,
+  syncGmailInbox,
+} from "./integrations/gmail";
+import {
   accountByExternal, createOrg, deleteAccount, deleteOrg, getAccount, listAccounts,
-  listOrgs, renameOrg, upsertAccount,
+  listOrgs, renameOrg, upsertAccount, consumeGmailOAuthState,
 } from "./store";
-import type { ChannelAccount, ChannelType, WebhookRequest } from "./types";
+import type { Attachment, ChannelAccount, ChannelType, WebhookRequest } from "./types";
 
 seedIfEmpty();
 
@@ -199,6 +207,119 @@ const server = Bun.serve({
       return json({ ok: true });
     }
 
+    // --- Gmail integration ----------------------------------------------
+    if (path === "/api/integrations/gmail/connect" && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      try {
+        return Response.redirect(gmailConnectUrl(orgId), 302);
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "could not start Gmail OAuth" }, 400);
+      }
+    }
+
+    if (path === "/api/integrations/gmail/callback" && method === "GET") {
+      const state = url.searchParams.get("state") ?? "";
+      const orgId = state ? consumeGmailOAuthState(state) : null;
+      if (!orgId) return json({ error: "invalid or expired OAuth state" }, 400);
+      const destination = new URL("/inbox", url.origin);
+      destination.searchParams.set("org", orgId);
+      const oauthError = url.searchParams.get("error");
+      if (oauthError) {
+        destination.searchParams.set("gmail_error", oauthError);
+        return Response.redirect(destination, 302);
+      }
+      const code = url.searchParams.get("code");
+      if (!code) return json({ error: "Google did not return an authorization code" }, 400);
+      try {
+        await completeGmailOAuth(orgId, code);
+        destination.searchParams.set("gmail", "connected");
+      } catch (error: unknown) {
+        destination.searchParams.set(
+          "gmail_error",
+          error instanceof Error ? error.message : "Gmail connection failed",
+        );
+      }
+      return Response.redirect(destination, 302);
+    }
+
+    if (path === "/api/integrations/gmail/status" && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      return json(gmailConnectionStatus(orgId));
+    }
+
+    if (path === "/api/integrations/gmail/disconnect" && method === "POST") {
+      const b = await body<{ orgId?: string }>(req);
+      if (!b?.orgId) return json({ error: "orgId is required" }, 400);
+      try {
+        await disconnectGmail(b.orgId);
+        return json({ ok: true });
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "Gmail logout failed" }, 400);
+      }
+    }
+
+    if (path === "/api/integrations/gmail/messages" && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      try {
+        return json(await syncGmailInbox(orgId));
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "Gmail inbox sync failed" }, 502);
+      }
+    }
+
+    const gmailAttachmentMatch = path.match(/^\/api\/integrations\/gmail\/attachments\/([^/]+)\/([^/]+)$/);
+    if (gmailAttachmentMatch && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      try {
+        const attachment = await downloadGmailAttachment(
+          orgId,
+          decodeURIComponent(gmailAttachmentMatch[1]!),
+          decodeURIComponent(gmailAttachmentMatch[2]!),
+          url.searchParams.get("name") ?? undefined,
+        );
+        const previewable = new Set([
+          "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp",
+          "application/pdf",
+        ]).has(attachment.mimeType.toLowerCase());
+        const disposition = url.searchParams.get("inline") === "1" && previewable
+          ? "inline"
+          : "attachment";
+        return new Response(attachment.bytes, {
+          headers: {
+            "content-type": attachment.mimeType,
+            "content-disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
+            "cache-control": "private, no-store",
+            "x-content-type-options": "nosniff",
+          },
+        });
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "attachment download failed" }, 404);
+      }
+    }
+
+    if (path === "/api/integrations/gmail/send" && method === "POST") {
+      const b = await body<{
+        orgId?: string; to?: string; subject?: string; bodyText?: string; attachments?: Attachment[];
+      }>(req);
+      if (!b?.orgId || !b.to?.trim() || !b.subject?.trim() || (!b.bodyText?.trim() && !b.attachments?.length)) {
+        return json({ error: "orgId, to, subject, and a message or attachment are required" }, 400);
+      }
+      const status = gmailConnectionStatus(b.orgId);
+      if (!status.connected || !status.accountId) return json({ error: "Gmail is not connected" }, 400);
+      const result = await startConversation({
+        accountId: status.accountId,
+        to: b.to,
+        subject: b.subject,
+        text: b.bodyText ?? "",
+        attachments: b.attachments,
+      });
+      return json(result, result.ok ? 201 : 400);
+    }
+
     // --- Channel accounts ------------------------------------------------
     if (path === "/api/channels" && method === "GET") {
       const orgId = url.searchParams.get("org");
@@ -264,9 +385,9 @@ const server = Bun.serve({
 
     const replyMatch = path.match(/^\/api\/conversations\/([^/]+)\/reply$/);
     if (replyMatch && method === "POST") {
-      const b = await body<{ text?: string }>(req);
-      if (!b?.text) return json({ error: "text is required" }, 400);
-      const res = await reply(replyMatch[1]!, b.text);
+      const b = await body<{ text?: string; attachments?: Attachment[] }>(req);
+      if (!b || (!b.text?.trim() && !b.attachments?.length)) return json({ error: "text or an attachment is required" }, 400);
+      const res = await reply(replyMatch[1]!, b.text ?? "", b.attachments);
       return json(res, res.ok ? 200 : 400);
     }
 

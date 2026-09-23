@@ -59,9 +59,14 @@ export interface ChannelAccount {
 
 export interface Attachment {
   type: MessageType;
+  /** Provider attachment id. Used to download without storing file bytes. */
+  id?: string;
   url?: string;
   name?: string;
   mimeType?: string;
+  size?: number;
+  /** Base64 payload used only while sending; never persisted or returned. */
+  data?: string;
 }
 
 /** A message after the connector has stripped away the platform's dialect. */
@@ -85,13 +90,17 @@ export interface OutboundMessage {
   to: string;
   type: MessageType;
   body: string;
+  subject?: string;
   threadHint?: string;
+  inReplyTo?: string;
+  references?: string;
   attachments?: Attachment[];
 }
 
 export interface SendResult {
   ok: boolean;
   externalMessageId?: string;
+  threadId?: string;
   error?: string;
 }
 

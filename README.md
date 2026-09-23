@@ -13,8 +13,8 @@ make demo        # starts the server, sends sample traffic, opens the console
 make help        # everything else
 ```
 
-- **Console** → `http://localhost:3000/` — organisations, provider settings, channel credentials
-- **Inbox** → `http://localhost:3000/inbox` — conversations, replies, new outbound threads
+- **Console** → `http://localhost:12301/` — organisations, provider settings, channel credentials
+- **Inbox** → `http://localhost:12301/inbox` — conversations, replies, new outbound threads
 
 No credentials needed to try it. Channels seed as `pending` with dev ids, and a
 signature check is skipped whenever that channel's secret is unset.
@@ -35,6 +35,58 @@ signature check is skipped whenever that channel's secret is unset.
 | `make env` | create `.env` from `.env.example` |
 
 Port comes from `.env`, overridable anywhere: `make dev PORT=4000`.
+
+## Gmail proof of concept
+
+The Inbox can connect one Gmail mailbox per organisation, import the latest 20
+messages carrying the `INBOX` label, preview received images, download
+attachments, send email with attachments, and reply in the same Gmail thread. It uses only
+`gmail.readonly` and `gmail.send`; there are no drafts, labels, webhooks, or
+background synchronization.
+
+### Google Cloud setup
+
+1. Create or select a Google Cloud project and enable the **Gmail API**.
+2. Configure the OAuth consent screen. While the app is in testing, add the
+   Gmail addresses you will use under **Test users**.
+3. Create an OAuth 2.0 Client ID with application type **Web application**.
+4. Add the exact callback URL as an authorized redirect URI. For the default
+   local setup this is
+   `http://localhost:12301/api/integrations/gmail/callback`.
+5. Open this app's **Settings** page and save the Google OAuth Client ID, Client
+   Secret, and the same Redirect URI. These can alternatively come from
+   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
+   `GOOGLE_OAUTH_REDIRECT_URI`.
+
+The redirect URI is an exact-match value: scheme, host, port, path, and trailing
+slash all matter. Use the public HTTPS callback URL instead when testing through
+a tunnel.
+
+### Test receiving
+
+1. Start the app and open `/inbox`.
+2. Select the target organisation and click **Connect Gmail**.
+3. Grant access at Google; the callback returns to the Inbox and performs the
+   initial sync.
+4. Send an email from a different account to the connected address.
+5. Click **Sync Gmail**, open the conversation, and confirm the sender,
+   recipient, subject, body, received time, Gmail message ID, and thread ID.
+6. For a message containing an attachment, click its file chip and confirm the
+   original file downloads correctly.
+
+### Test sending
+
+1. In `/inbox`, click **Compose email**.
+2. Enter another test address, `Gmail Integration Test`, and
+   `Hello from Omnichannel`, then optionally select one or more files.
+3. Click **Send** and confirm it appears in the Omnichannel conversation and in
+   the recipient's mailbox. The normal reply box also sends a threaded Gmail
+   reply for imported messages.
+
+For this POC, sync is manual (and runs once after OAuth), the email body is
+plain text, attachments are limited to 10 MB each and 20 MB total, credentials
+are plaintext in the local SQLite file, and there is no app authentication or
+multi-Gmail-account support.
 
 **Set `NGROK_DOMAIN` in `.env`** to a free static domain from
 [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains). Without it
@@ -57,6 +109,8 @@ src/
     meta.ts           Messenger + Instagram + WhatsApp (one Meta app)
     line.ts           LINE Messaging API
     email.ts          provider-neutral inbound webhook + outbound HTTP API
+  integrations/
+    gmail.ts          OAuth, token refresh, Inbox import, and Gmail API sending
   web/
     index.html        console: organisations, secrets, collapsible channel setup
     inbox.html        agent inbox: org switcher, replies, new conversations
@@ -66,8 +120,8 @@ src/
 
 This split mirrors the business model:
 
-- **Provider settings** (`app_settings` table) — the Meta app **you** own as the
-  tech provider: app id, app secret, verify token. Shared by every client.
+- **Provider settings** (`app_settings` table) — the Meta and Google apps **you**
+  own as the tech provider. Shared by every client.
 - **Channel accounts** (`channel_accounts` table) — what each **client** owns:
   Page tokens, WhatsApp phone number ids, LINE channel secrets, mailboxes.
 
@@ -87,6 +141,11 @@ the stored one untouched.
 | `GET/POST /api/orgs`, `PATCH/DELETE /api/orgs/:id` | organisations |
 | `GET/POST /api/settings` | provider settings |
 | `GET/POST /api/channels`, `DELETE /api/channels/:id` | channel accounts |
+| `GET /api/integrations/gmail/connect`, `GET /api/integrations/gmail/callback` | Gmail OAuth flow |
+| `GET /api/integrations/gmail/status`, `GET /api/integrations/gmail/messages` | connection status and manual inbox sync |
+| `POST /api/integrations/gmail/disconnect` | revoke Gmail access and remove locally stored OAuth tokens |
+| `POST /api/integrations/gmail/send` | send a new email through the connected Gmail account |
+| `GET /api/integrations/gmail/attachments/:messageId/:attachmentId` | download an attachment from Gmail |
 | `GET /api/conversations?org=` | inbox data |
 | `POST /api/conversations` | start an outbound conversation |
 | `POST /api/conversations/:id/reply` | reply, subject to capability guards |

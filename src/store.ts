@@ -24,6 +24,8 @@ export interface Conversation {
 export interface MessageRow {
   id: string; conversation_id: string; direction: Direction; type: MessageType;
   body: string; attachments: string; external_message_id: string | null;
+  sender: string | null; recipient: string | null; rfc_message_id: string | null;
+  references_header: string | null;
   status: string; error: string | null; created_at: number;
 }
 
@@ -111,6 +113,15 @@ export function deleteAccount(id: string) {
   q("DELETE FROM channel_accounts WHERE id = ?").run(id);
 }
 
+export function updateAccountConnection(
+  id: string,
+  credentials: Record<string, string>,
+  status: ChannelAccount["status"],
+) {
+  q("UPDATE channel_accounts SET credentials = ?, status = ? WHERE id = ?")
+    .run(JSON.stringify(credentials), status, id);
+}
+
 // ---------- contacts & identities ----------
 
 export function findIdentity(orgId: string, channelType: ChannelType, externalUserId: string) {
@@ -161,8 +172,15 @@ export function findOrCreateConversation(opts: {
   orgId: string; accountId: string; contactId: string;
   channelType: ChannelType; threadHint?: string; subject?: string;
 }): Conversation {
+  if (opts.threadHint) {
+    const threaded = q<Conversation>(
+      "SELECT * FROM conversations WHERE account_id = ? AND thread_hint = ? AND status != 'closed' LIMIT 1",
+    ).get(opts.accountId, opts.threadHint);
+    if (threaded) return threaded;
+  }
+
   const open = q<Conversation>(
-    "SELECT * FROM conversations WHERE account_id = ? AND contact_id = ? AND status != 'closed' LIMIT 1",
+    "SELECT * FROM conversations WHERE account_id = ? AND contact_id = ? AND status != 'closed' AND thread_hint IS NULL LIMIT 1",
   ).get(opts.accountId, opts.contactId);
   if (open) return open;
 
@@ -173,6 +191,10 @@ export function findOrCreateConversation(opts: {
     .run(id, opts.orgId, opts.accountId, opts.contactId, opts.channelType,
          opts.subject ?? null, opts.threadHint ?? null, Date.now(), Date.now());
   return getConversation(id)!;
+}
+
+export function updateConversationThread(id: string, threadHint: string) {
+  q("UPDATE conversations SET thread_hint = ? WHERE id = ?").run(threadHint, id);
 }
 
 export function listConversations(orgId: string): Conversation[] {
@@ -191,24 +213,28 @@ export function setLastInboundAt(conversationId: string, at: number) {
 export function addMessage(m: {
   conversationId: string; direction: Direction; type: MessageType; body: string;
   attachments: Attachment[]; externalMessageId?: string; status: string; error?: string;
+  sender?: string; recipient?: string; rfcMessageId?: string; references?: string;
+  createdAt?: number;
 }): MessageRow | null {
   const id = uid();
-  const now = Date.now();
+  const now = m.createdAt ?? Date.now();
   try {
     q(`INSERT INTO messages
-         (id, conversation_id, direction, type, body, attachments, external_message_id, status, error, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+         (id, conversation_id, direction, type, body, attachments, external_message_id,
+          sender, recipient, rfc_message_id, references_header, status, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, m.conversationId, m.direction, m.type, m.body,
            JSON.stringify(m.attachments), m.externalMessageId ?? null,
-           m.status, m.error ?? null, now);
-  } catch (err: any) {
+           m.sender ?? null, m.recipient ?? null, m.rfcMessageId ?? null,
+           m.references ?? null, m.status, m.error ?? null, now);
+  } catch (err: unknown) {
     // Unique index on external_message_id — a retried webhook lands here.
-    if (String(err?.message).includes("UNIQUE")) return null;
+    if (err instanceof Error && err.message.includes("UNIQUE")) return null;
     throw err;
   }
 
-  q(`UPDATE conversations SET last_message_at = ?
-       ${m.direction === "inbound" ? ", last_inbound_at = ?" : ""} WHERE id = ?`)
+  q(`UPDATE conversations SET last_message_at = MAX(last_message_at, ?)
+       ${m.direction === "inbound" ? ", last_inbound_at = MAX(last_inbound_at, ?)" : ""} WHERE id = ?`)
     .run(...(m.direction === "inbound" ? [now, now, m.conversationId] : [now, m.conversationId]));
 
   return getMessage(id);
@@ -231,4 +257,28 @@ export function messagesOf(conversationId: string): MessageRow[] {
 
 export function messageExists(externalMessageId: string): boolean {
   return !!q<{ n: number }>("SELECT 1 AS n FROM messages WHERE external_message_id = ?").get(externalMessageId);
+}
+
+export function updateMessageAttachments(externalMessageId: string, attachments: Attachment[]) {
+  q("UPDATE messages SET attachments = ? WHERE external_message_id = ?")
+    .run(JSON.stringify(attachments), externalMessageId);
+}
+
+// ---------- Gmail OAuth state -------------------------------------------
+
+export function createGmailOAuthState(orgId: string): string {
+  const state = `${uid()}${uid()}`.replaceAll("-", "");
+  const expiresAt = Date.now() + 10 * 60_000;
+  q("DELETE FROM gmail_oauth_states WHERE expires_at < ?").run(Date.now());
+  q("INSERT INTO gmail_oauth_states (state, org_id, expires_at) VALUES (?, ?, ?)")
+    .run(state, orgId, expiresAt);
+  return state;
+}
+
+export function consumeGmailOAuthState(state: string): string | null {
+  const row = q<{ org_id: string; expires_at: number }>(
+    "SELECT org_id, expires_at FROM gmail_oauth_states WHERE state = ?",
+  ).get(state);
+  q("DELETE FROM gmail_oauth_states WHERE state = ?").run(state);
+  return row && row.expires_at >= Date.now() ? row.org_id : null;
 }

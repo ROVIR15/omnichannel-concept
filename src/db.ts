@@ -87,9 +87,21 @@ CREATE TABLE IF NOT EXISTS messages (
   body                 TEXT NOT NULL DEFAULT '',
   attachments          TEXT NOT NULL DEFAULT '[]',
   external_message_id  TEXT,
+  sender               TEXT,
+  recipient            TEXT,
+  rfc_message_id       TEXT,
+  references_header    TEXT,
   status               TEXT NOT NULL,
   error                TEXT,
   created_at           INTEGER NOT NULL
+);
+
+-- Short-lived, single-use Gmail OAuth state values. Keeping these server-side
+-- means the callback never has to trust organisation data from the browser.
+CREATE TABLE IF NOT EXISTS gmail_oauth_states (
+  state       TEXT PRIMARY KEY,
+  org_id      TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  expires_at  INTEGER NOT NULL
 );
 
 -- Idempotency: platforms retry webhooks, sometimes for hours.
@@ -99,6 +111,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external
 CREATE INDEX IF NOT EXISTS idx_conv_org ON conversations(org_id, last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id, created_at);
 `);
+
+// Small forward-only migrations keep existing playground databases working.
+// SQLite does not support ADD COLUMN IF NOT EXISTS, so inspect first.
+const messageColumns = new Set(
+  sqlite.query<{ name: string }, []>("PRAGMA table_info(messages)").all().map((column) => column.name),
+);
+for (const [name, type] of [
+  ["sender", "TEXT"],
+  ["recipient", "TEXT"],
+  ["rfc_message_id", "TEXT"],
+  ["references_header", "TEXT"],
+] as const) {
+  if (!messageColumns.has(name)) sqlite.exec(`ALTER TABLE messages ADD COLUMN ${name} ${type}`);
+}
 
 export const uid = () => crypto.randomUUID();
 
