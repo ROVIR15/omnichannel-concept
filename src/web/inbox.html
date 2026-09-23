@@ -3,19 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Omnichannel Inbox</title>
+<title>Inbox</title>
+<link rel="stylesheet" href="/web/shell.css" />
 <style>
-  :root { color-scheme: light dark; --line:#0002; --muted:#0009; --accent:#2563eb; --warn:#b45309; }
-  * { box-sizing:border-box; }
-  body { margin:0; font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; display:flex; flex-direction:column; height:100vh; }
-  header { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  header h1 { font-size:15px; margin:0; font-weight:700; }
-  nav a { color:var(--muted); text-decoration:none; margin-left:14px; font-size:13px; }
-  nav a.on, nav a:hover { color:var(--accent); }
-  select, input, textarea { padding:7px 9px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
-  button { padding:7px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; font:inherit; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  button.ghost { background:transparent; border:1px solid var(--line); color:inherit; }
+  /* Chrome (tokens, header, buttons) comes from shell.css; this block is the
+     inbox layout only, plus the few controls that size differently here. */
+  body { display:flex; flex-direction:column; height:100vh; }
+  select, input, textarea { padding:7px 9px; width:auto; }
   #body { flex:1; display:flex; min-height:0; }
   #list { width:320px; border-right:1px solid var(--line); overflow-y:auto; }
   .conv { padding:12px 14px; border-bottom:1px solid var(--line); cursor:pointer; }
@@ -83,21 +77,6 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>Inbox</h1>
-  <select id="orgSelect"></select>
-  <button id="newConv">New conversation</button>
-  <button id="gmailCompose" hidden>Compose email</button>
-  <button class="ghost" id="gmailConnect">Connect Gmail</button>
-  <button class="ghost" id="gmailSync" hidden>Sync Gmail</button>
-  <button class="ghost" id="gmailLogout" hidden>Log out Gmail</button>
-  <span id="gmailState"></span>
-  <nav style="margin-left:auto">
-    <a href="/">Settings</a>
-    <a href="/inbox" class="on">Inbox</a>
-  </nav>
-</header>
-
 <div id="body">
   <div id="list"></div>
   <div id="pane">
@@ -161,20 +140,17 @@
   </div>
 </dialog>
 
+<script src="/web/shell.js"></script>
 <script>
+// Connecting a mailbox lives on Channels; the Inbox only reads and replies.
+const HEADER_ACTIONS = `
+  <button id="newConv">New conversation</button>
+  <button id="gmailCompose" hidden>Compose email</button>
+  <button class="ghost" id="gmailSync" hidden>Sync Gmail</button>
+  <span id="gmailState"></span>`;
+
 const query = new URLSearchParams(location.search);
-let orgs = [], orgId = query.get('org') || localStorage.getItem('orgId') || '';
 let accounts = [], convs = [], active = null, gmail = { configured:false, connected:false };
-
-const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-
-async function api(path, opts) {
-  const res = await fetch(path, opts);
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-  return body;
-}
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 20 * 1024 * 1024;
@@ -289,20 +265,11 @@ const PLACEHOLDER = {
   email:     'name@example.com',
 };
 
-async function loadOrgs() {
-  orgs = await api('/api/orgs');
-  if (!orgs.find(o => o.id === orgId)) orgId = orgs[0]?.id || '';
-  localStorage.setItem('orgId', orgId);
-  $('#orgSelect').innerHTML = orgs.map(o =>
-    `<option value="${o.id}" ${o.id === orgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
-}
 
-$('#orgSelect').onchange = async e => {
-  orgId = e.target.value;
-  localStorage.setItem('orgId', orgId);
+window.addEventListener('orgchange', async () => {
   active = null;
   await loadAccounts(); await loadGmailStatus(); await load();
-};
+});
 
 async function loadAccounts() {
   const data = await api(`/api/channels?org=${encodeURIComponent(orgId)}`);
@@ -318,13 +285,11 @@ async function load() {
 
 async function loadGmailStatus() {
   gmail = await api(`/api/integrations/gmail/status?org=${encodeURIComponent(orgId)}`);
-  $('#gmailConnect').textContent = gmail.connected ? 'Reconnect Gmail' : 'Connect Gmail';
   $('#gmailSync').hidden = !gmail.connected;
   $('#gmailCompose').hidden = !gmail.connected;
-  $('#gmailLogout').hidden = !gmail.connected;
-  $('#gmailState').textContent = gmail.connected
-    ? `Connected: ${gmail.emailAddress}`
-    : (gmail.configured ? 'Gmail not connected' : 'Configure Google OAuth in Settings');
+  $('#gmailState').innerHTML = gmail.connected
+    ? `Gmail: ${esc(gmail.emailAddress)}`
+    : `<a href="/channels">${gmail.configured ? 'Connect Gmail' : 'Set up Google OAuth'}</a>`;
 }
 
 async function syncGmail() {
@@ -409,29 +374,6 @@ $('#replyFiles').onchange = e => {
 };
 
 // ---------- Gmail ----------
-$('#gmailConnect').onclick = () => {
-  if (!gmail.configured) { alert('Save the Google OAuth values in Settings first.'); return; }
-  location.href = `/api/integrations/gmail/connect?org=${encodeURIComponent(orgId)}`;
-};
-$('#gmailSync').onclick = syncGmail;
-$('#gmailLogout').onclick = async () => {
-  if (!confirm(`Log out ${gmail.emailAddress || 'this Gmail account'}? Existing inbox history will be kept.`)) return;
-  const button = $('#gmailLogout');
-  button.disabled = true;
-  try {
-    await api('/api/integrations/gmail/disconnect', {
-      method:'POST', headers:{'content-type':'application/json'},
-      body: JSON.stringify({ orgId }),
-    });
-    await loadAccounts();
-    await loadGmailStatus();
-  } catch (e) {
-    alert('Gmail logout failed: ' + e.message);
-  } finally {
-    button.disabled = false;
-  }
-};
-$('#gmailCompose').onclick = () => $('#gmailDlg').showModal();
 $('#gmailCancel').onclick = () => $('#gmailDlg').close();
 $('#gmailSend').onclick = async () => {
   const button = $('#gmailSend');
@@ -460,14 +402,18 @@ $('#gmailSend').onclick = async () => {
 };
 
 // ---------- new conversation ----------
-$('#newConv').onclick = async () => {
-  await loadAccounts();
-  if (!accounts.length) { alert('Connect a channel first in Settings.'); return; }
-  $('#dlgAccount').innerHTML = accounts.map(a =>
-    `<option value="${a.id}" data-type="${a.channelType}">${esc(a.displayName)} — ${a.channelType}</option>`).join('');
-  updateHint();
-  $('#dlg').showModal();
-};
+function wireHeaderActions() {
+  $('#newConv').onclick = async () => {
+    await loadAccounts();
+    if (!accounts.length) { alert('Connect a channel first on Channels.'); return; }
+    $('#dlgAccount').innerHTML = accounts.map(a =>
+      `<option value="${a.id}" data-type="${a.channelType}">${esc(a.displayName)} — ${a.channelType}</option>`).join('');
+    updateHint();
+    $('#dlg').showModal();
+  };
+  $('#gmailSync').onclick = syncGmail;
+  $('#gmailCompose').onclick = () => $('#gmailDlg').showModal();
+}
 
 function updateHint() {
   const opt = $('#dlgAccount').selectedOptions[0];
@@ -505,7 +451,11 @@ $('#dlgCreate').onclick = async () => {
 };
 
 (async () => {
-  await loadOrgs(); await loadAccounts(); await loadGmailStatus();
+  await mountShell({ active: '/inbox', actions: HEADER_ACTIONS });
+  wireHeaderActions();
+  const fromCallback = query.get('org');
+  if (fromCallback) { orgId = fromCallback; localStorage.setItem('orgId', orgId); await loadOrgs(); }
+  await loadAccounts(); await loadGmailStatus();
   if (query.get('gmail_error')) alert('Gmail connection failed: ' + query.get('gmail_error'));
   if (query.get('gmail') === 'connected') await syncGmail();
   await load();

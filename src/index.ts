@@ -4,8 +4,12 @@
 import { ingest, inbox, reply, startConversation } from "./core";
 import { signingSecrets } from "./connectors/meta";
 import { connectorFor } from "./registry";
+import {
+  completeFacebookLogin, connectFacebookPage, facebookConfigured, facebookLoginUrl, facebookPages,
+  type FacebookChannel,
+} from "./oauth";
 import { seedIfEmpty } from "./seed";
-import { APP_SETTING_FIELDS, maskedAppSettings, saveAppSettings } from "./settings";
+import { APP_SETTING_FIELDS, appSetting, maskedAppSettings, saveAppSettings } from "./settings";
 import {
   completeGmailOAuth,
   disconnectGmail,
@@ -39,6 +43,14 @@ const page = (file: string) =>
     headers: { "content-type": "text/html" },
   });
 
+/** Shared header/helpers the console pages pull in, so the three stay in sync. */
+const asset = (file: string) => {
+  const type = file.endsWith(".css") ? "text/css" : "text/javascript";
+  return new Response(Bun.file(new URL(`./web/${file}`, import.meta.url)), {
+    headers: { "content-type": type },
+  });
+};
+
 /** Never send stored secrets back to the browser — only whether they exist. */
 function maskAccount(a: ChannelAccount) {
   const fields = connectorFor(a.channelType).credentialFields();
@@ -71,6 +83,20 @@ function mergeCredentials(existing: Record<string, string>, incoming: Record<str
   }
   return merged;
 }
+
+const redirect = (to: string) => new Response(null, { status: 302, headers: { location: to } });
+
+/** Behind a tunnel the request arrives as http://localhost; the public origin
+ *  is in the forwarded headers. Facebook compares redirect URIs exactly. */
+function facebookRedirectUri(req: Request, url: URL): string {
+  const configured = appSetting("meta_oauth_redirect_uri");
+  if (configured) return configured;
+  const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
+  return `${proto}://${host}/api/integrations/facebook/callback`;
+}
+
+const FACEBOOK_CHANNELS: FacebookChannel[] = ["messenger", "instagram"];
 
 async function handleWebhook(channel: ChannelType, req: Request, url: URL) {
   const connector = connectorFor(channel);
@@ -155,7 +181,10 @@ const server = Bun.serve({
 
     // --- Pages ----------------------------------------------------------
     if (path === "/" || path === "/settings" || path === "/console") return page("index.html");
+    if (path === "/channels") return page("channels.html");
     if (path === "/inbox") return page("inbox.html");
+    if (path === "/web/shell.css") return asset("shell.css");
+    if (path === "/web/shell.js") return asset("shell.js");
 
     // --- Webhooks -------------------------------------------------------
     // One Meta endpoint serves Messenger, Instagram and WhatsApp; the parser
@@ -365,6 +394,45 @@ const server = Bun.serve({
     if (chanMatch && method === "DELETE") {
       deleteAccount(chanMatch[1]!);
       return json({ ok: true });
+    }
+
+    // --- Facebook Login (Messenger + Instagram) ---------------------------
+    if (path === "/api/integrations/facebook/status" && method === "GET") {
+      return json({ configured: facebookConfigured(), configId: Boolean(appSetting("meta_login_config_id")) });
+    }
+
+    if (path === "/api/integrations/facebook/connect" && method === "GET") {
+      const orgId = url.searchParams.get("org") ?? "";
+      const channel = url.searchParams.get("channel") as FacebookChannel;
+      if (!orgId || !FACEBOOK_CHANNELS.includes(channel)) {
+        return json({ error: "org and channel (messenger|instagram) are required" }, 400);
+      }
+      if (!facebookConfigured()) return json({ error: "Meta App ID and App Secret are not set in Settings" }, 400);
+      return redirect(facebookLoginUrl(orgId, channel, facebookRedirectUri(req, url)));
+    }
+
+    if (path === "/api/integrations/facebook/callback" && method === "GET") {
+      const r = await completeFacebookLogin(url.searchParams);
+      const back = new URLSearchParams();
+      if (r.orgId) back.set("org", r.orgId);
+      if (r.channel) back.set("channel", r.channel);
+      if (r.ok) back.set("fb", r.session!);
+      else back.set("fb_error", r.error ?? "Facebook login failed");
+      return redirect(`/channels?${back}`);
+    }
+
+    if (path === "/api/integrations/facebook/pages" && method === "GET") {
+      const pages = facebookPages(url.searchParams.get("session") ?? "", url.searchParams.get("org") ?? "");
+      return pages ? json(pages) : json({ error: "Login expired — please connect with Facebook again." }, 404);
+    }
+
+    if (path === "/api/integrations/facebook/pages" && method === "POST") {
+      const b = await body<{ session?: string; orgId?: string; pageId?: string; channel?: FacebookChannel }>(req);
+      if (!b?.session || !b.orgId || !b.pageId || !FACEBOOK_CHANNELS.includes(b.channel!)) {
+        return json({ error: "session, orgId, pageId and channel are required" }, 400);
+      }
+      const r = await connectFacebookPage({ session: b.session, orgId: b.orgId, pageId: b.pageId, channel: b.channel! });
+      return r.ok ? json(maskAccount(r.account!)) : json({ error: `${r.step}: ${r.error}` }, 400);
     }
 
     // --- Inbox -----------------------------------------------------------

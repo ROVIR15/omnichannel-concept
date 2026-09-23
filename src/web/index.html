@@ -3,110 +3,37 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Omnichannel Console</title>
+<title>Settings</title>
+<link rel="stylesheet" href="/web/shell.css" />
 <style>
-  :root {
-    color-scheme: light dark;
-    --line: #0002; --muted: #0009; --accent: #2563eb;
-    --ok: #16a34a; --warn: #b45309; --bad: #dc2626;
-    --card: #00000006;
-  }
-  * { box-sizing: border-box; }
-  body { margin:0; font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-  header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  header h1 { font-size:15px; margin:0; font-weight:700; letter-spacing:-.01em; }
-  nav a { color:var(--muted); text-decoration:none; margin-left:14px; font-size:13px; }
-  nav a.on, nav a:hover { color:var(--accent); }
   main { max-width:900px; margin:0 auto; padding:24px 20px 64px; }
   section { margin-bottom:36px; }
   h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 12px; }
-  .card { border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:12px; background:var(--card); }
-  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .spread { justify-content:space-between; }
-  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
-  input, select { padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; width:100%; }
-  .field { margin-bottom:12px; }
-  .help { font-size:11px; color:var(--muted); margin-top:4px; }
-  button { padding:8px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; font:inherit; }
-  button.ghost { background:transparent; border:1px solid var(--line); color:inherit; }
-  button.danger { background:transparent; border:1px solid var(--line); color:var(--bad); }
-  .badge { font-size:10px; text-transform:uppercase; letter-spacing:.05em; padding:2px 7px; border-radius:5px; background:#00000012; }
-  .badge.active { background:#16a34a22; color:var(--ok); }
-  .badge.pending { background:#b4530922; color:var(--warn); }
-  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .chan-title { font-weight:650; }
-  .sub { color:var(--muted); font-size:12px; }
-  code { background:#00000010; padding:1px 5px; border-radius:4px; font-size:12px; }
-  #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#111; color:#fff; padding:9px 16px; border-radius:8px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; }
-  #toast.show { opacity:1; }
-  details.chan { border:1px solid var(--line); border-radius:10px; background:var(--card); margin-bottom:10px; overflow:hidden; }
-  details.chan > summary {
-    list-style:none; cursor:pointer; padding:12px 16px;
-    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-  }
-  details.chan > summary::-webkit-details-marker { display:none; }
-  details.chan > summary:hover { background:#00000008; }
+  details.grp { border:1px solid var(--line); border-radius:10px; background:var(--card); margin-bottom:10px; overflow:hidden; }
+  details.grp > summary { list-style:none; cursor:pointer; padding:12px 16px; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  details.grp > summary::-webkit-details-marker { display:none; }
+  details.grp > summary:hover { background:#00000008; }
+  details.grp[open] > summary { border-bottom:1px solid var(--line); }
   .chev { display:inline-block; transition:transform .15s; color:var(--muted); font-size:11px; }
-  details.chan[open] > summary .chev { transform:rotate(90deg); }
-  details.chan[open] > summary { border-bottom:1px solid var(--line); }
-  .summary-id { font-size:12px; color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
-  .summary-caps { margin-left:auto; font-size:11px; color:var(--muted); }
-  .chan-body { padding:16px; }
-  button.small { padding:5px 10px; font-size:12px; }
-  @media (max-width:640px){ .summary-caps { margin-left:0; width:100%; } }
-  @media (max-width:640px){ .grid{grid-template-columns:1fr;} }
+  details.grp[open] > summary .chev { transform:rotate(90deg); }
+  .grp-title { font-weight:650; }
+  .grp-hint { font-size:12px; color:var(--muted); margin-left:auto; }
+  .grp-body { padding:16px; }
+  @media (max-width:640px){ .grp-hint { margin-left:0; width:100%; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>Omnichannel Console</h1>
-  <div class="row" style="gap:6px">
-    <label style="margin:0">Organisation</label>
-    <select id="orgSelect" style="width:auto"></select>
-    <button class="ghost" id="renameOrg">Rename</button>
-    <button class="ghost" id="newOrg">New</button>
-    <button class="danger" id="delOrg">Delete</button>
-  </div>
-  <nav style="margin-left:auto">
-    <a href="/" class="on">Settings</a>
-    <a href="/inbox">Inbox</a>
-  </nav>
-</header>
 
 <main>
   <section>
-    <h2>Provider integration settings</h2>
-    <div class="card">
-      <p class="sub" style="margin-top:0">
-        Configure the provider apps used by every client organisation, including Meta and Google OAuth.
-        Secrets stay on the server and are never returned to this page.
-      </p>
-      <div id="appSettings" class="grid"></div>
-      <button id="saveSettings">Save provider settings</button>
-    </div>
-  </section>
-
-  <section>
-    <div class="row spread" style="margin-bottom:12px">
-      <h2 style="margin:0">Connected channels</h2>
-      <div class="row" style="gap:6px">
-        <button class="ghost small" id="expandAll">Expand all</button>
-        <button class="ghost small" id="collapseAll">Collapse all</button>
-      </div>
-    </div>
-    <div id="channels"></div>
-  </section>
-
-  <section>
-    <h2>Add a channel</h2>
-    <div class="card">
-      <div class="field" style="max-width:280px">
-        <label>Channel</label>
-        <select id="newChannelType"></select>
-      </div>
-      <div id="newChannelForm"></div>
-      <button id="addChannel">Connect channel</button>
-    </div>
+    <h2>Provider apps</h2>
+    <p class="sub" style="margin:0 0 14px">
+      The apps <strong>you</strong> own as the tech provider, shared by every client organisation.
+      Clients never see these — they connect their own accounts on
+      <a href="/channels">Channels</a>. Secrets stay on the server and are never returned to this page.
+    </p>
+    <div id="groups"></div>
+    <button id="saveSettings">Save provider settings</button>
   </section>
 
   <section>
@@ -122,225 +49,67 @@
   </section>
 </main>
 
-<div id="toast"></div>
-
+<script src="/web/shell.js"></script>
 <script>
-let orgs = [], orgId = localStorage.getItem('orgId') || '', channels = { accounts: [], catalogue: [] };
-const openChannels = new Set();  // which channel panels are expanded
+// Provider settings arrive as one flat list. Group them by key prefix so the
+// page stays readable as channels are added; anything unmatched falls into
+// "Other", so a new key shows up here without this file being edited.
+const GROUPS = [
+  { id:'meta',   label:'Meta',   hint:'Messenger, Instagram and WhatsApp share one Meta app',
+    match: k => k.startsWith('meta_') || k.startsWith('instagram_') },
+  { id:'google', label:'Google', hint:'Gmail OAuth for the email channel',
+    match: k => k.startsWith('google_') },
+];
 
-const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let fields = [];
 
-function toast(msg) {
-  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2200);
+function groupsOf(all) {
+  const out = GROUPS
+    .map(g => ({ ...g, fields: all.filter(f => g.match(f.key)) }))
+    .filter(g => g.fields.length);
+  const rest = all.filter(f => !GROUPS.some(g => g.match(f.key)));
+  if (rest.length) out.push({ id:'other', label:'Other', hint:'', fields: rest });
+  return out;
 }
 
-async function api(path, opts) {
-  const res = await fetch(path, opts);
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-  return body;
-}
-
-// ---------- organisations ----------
-async function loadOrgs() {
-  orgs = await api('/api/orgs');
-  if (!orgs.find(o => o.id === orgId)) orgId = orgs[0]?.id || '';
-  localStorage.setItem('orgId', orgId);
-  $('#orgSelect').innerHTML = orgs.map(o =>
-    `<option value="${o.id}" ${o.id === orgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
-}
-
-$('#orgSelect').onchange = e => {
-  orgId = e.target.value;
-  localStorage.setItem('orgId', orgId);
-  loadChannels();
-};
-
-$('#newOrg').onclick = async () => {
-  const name = prompt('Organisation name');
-  if (!name) return;
-  const org = await api('/api/orgs', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ name }) });
-  orgId = org.id; localStorage.setItem('orgId', orgId);
-  await loadOrgs(); await loadChannels(); toast('Organisation created');
-};
-
-$('#renameOrg').onclick = async () => {
-  const current = orgs.find(o => o.id === orgId);
-  const name = prompt('New name', current?.name || '');
-  if (!name) return;
-  await api(`/api/orgs/${orgId}`, { method:'PATCH', headers:{'content-type':'application/json'}, body: JSON.stringify({ name }) });
-  await loadOrgs(); toast('Renamed');
-};
-
-$('#delOrg').onclick = async () => {
-  const current = orgs.find(o => o.id === orgId);
-  if (!confirm(`Delete "${current?.name}" and all its channels and conversations?`)) return;
-  try {
-    await api(`/api/orgs/${orgId}`, { method:'DELETE' });
-    orgId = ''; await loadOrgs(); await loadChannels(); toast('Deleted');
-  } catch (e) { alert(e.message); }
-};
-
-// ---------- provider settings ----------
 async function loadSettings() {
-  const fields = await api('/api/settings');
-  $('#appSettings').innerHTML = fields.map(f => `
-    <div class="field">
-      <label>${esc(f.label)} ${f.configured ? '<span class="badge active">set</span>' : ''} ${f.fromEnv ? '<span class="badge">from .env</span>' : ''}</label>
-      <input data-key="${f.key}" type="${f.secret ? 'password' : 'text'}"
-             value="${esc(f.value)}" placeholder="${f.secret && f.configured ? '•••••••• (unchanged)' : ''}" />
-      ${f.help ? `<div class="help">${esc(f.help)}</div>` : ''}
-    </div>`).join('');
+  fields = await api('/api/settings');
+  $('#groups').innerHTML = groupsOf(fields).map((g, i) => `
+    <details class="grp" ${i === 0 ? 'open' : ''}>
+      <summary>
+        <span class="chev" aria-hidden="true">▸</span>
+        <span class="grp-title">${esc(g.label)}</span>
+        <span class="badge ${g.fields.every(f => f.configured) ? 'active' : 'pending'}">
+          ${g.fields.filter(f => f.configured).length}/${g.fields.length} set
+        </span>
+        <span class="grp-hint">${esc(g.hint)}</span>
+      </summary>
+      <div class="grp-body">
+        <div class="grid">
+          ${g.fields.map(f => fieldHtml(
+              { ...f, label: `${f.label}${f.fromEnv ? ' · from .env' : ''}` },
+              'data-key', f.value, f.configured)).join('')}
+        </div>
+      </div>
+    </details>`).join('');
 }
 
 $('#saveSettings').onclick = async () => {
-  const body = {};
-  document.querySelectorAll('#appSettings input').forEach(i => body[i.dataset.key] = i.value);
-  await api('/api/settings', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
-  await loadSettings(); toast('Provider settings saved');
+  const patch = {};
+  $$('#groups input[data-key]').forEach(i => patch[i.dataset.key] = i.value);
+  await jsonPost('/api/settings', patch);
+  await loadSettings();
+  toast('Provider settings saved');
 };
 
-// ---------- channels ----------
-function fieldHtml(f, prefix, value = '', configured = false) {
-  return `
-    <div class="field">
-      <label>${esc(f.label)} ${configured ? '<span class="badge active">set</span>' : ''}</label>
-      <input data-${prefix}="${f.key}" type="${f.secret ? 'password' : 'text'}"
-             value="${esc(value)}" placeholder="${f.secret && configured ? '•••••••• (unchanged)' : ''}" />
-      ${f.help ? `<div class="help">${esc(f.help)}</div>` : ''}
-    </div>`;
-}
-
-async function loadChannels() {
-  channels = await api(`/api/channels?org=${encodeURIComponent(orgId)}`);
-  $('#channels').innerHTML = channels.accounts.map(a => `
-    <details class="chan" data-account="${a.id}" ${openChannels.has(a.id) ? 'open' : ''}>
-      <summary>
-        <span class="chev" aria-hidden="true">▸</span>
-        <span class="chan-title">${esc(a.displayName)}</span>
-        <span class="badge">${a.channelType}</span>
-        <span class="badge ${a.status}">${a.status}</span>
-        <span class="summary-id">${esc(a.externalId)}</span>
-        <span class="summary-caps">
-          ${a.capabilities.hasSessionWindow ? `${a.capabilities.sessionWindowHours}h window` : 'no window'}
-          · ${a.capabilities.maxTextLength} chars${a.capabilities.supportsTemplates ? ' · templates' : ''}
-        </span>
-      </summary>
-      <div class="chan-body">
-        <div class="grid">
-          <div class="field">
-            <label>Display name</label>
-            <input data-meta-${a.id}="displayName" value="${esc(a.displayName)}" />
-          </div>
-          <div class="field">
-            <label>Platform ID</label>
-            <input data-meta-${a.id}="externalId" value="${esc(a.externalId)}" />
-            <div class="help">Page ID · IG account ID · WhatsApp phone number ID · LINE channel ID · mailbox address</div>
-          </div>
-        </div>
-        <div class="grid">
-          ${a.fields.map(f => fieldHtml(f, `cred-${a.id}`, f.value, f.configured)).join('')}
-        </div>
-        <div class="row" style="justify-content:flex-end; gap:8px">
-          <button class="danger" data-del="${a.id}">Remove</button>
-          <button data-save="${a.id}">Save</button>
-        </div>
-      </div>
-    </details>`).join('') || '<div class="card sub">No channels connected to this organisation yet.</div>';
-
-  // Remember which panels were open, so a save or refresh does not collapse them.
-  document.querySelectorAll('details.chan').forEach(d => {
-    d.addEventListener('toggle', () => {
-      d.open ? openChannels.add(d.dataset.account) : openChannels.delete(d.dataset.account);
-    });
-  });
-
-  document.querySelectorAll('[data-save]').forEach(b => b.onclick = () => saveAccount(b.dataset.save));
-  document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => removeAccount(b.dataset.del));
-
-  const sel = $('#newChannelType');
-  if (!sel.options.length) {
-    sel.innerHTML = channels.catalogue.map(c => `<option value="${c.channelType}">${c.channelType}</option>`).join('');
-    sel.onchange = renderNewForm;
-  }
-  renderNewForm();
-}
-
-function renderNewForm() {
-  const type = $('#newChannelType').value;
-  const spec = channels.catalogue.find(c => c.channelType === type);
-  if (!spec) return;
-  $('#newChannelForm').innerHTML = `
-    <div class="grid">
-      <div class="field">
-        <label>Display name</label>
-        <input id="newName" placeholder="e.g. Acme Support Line" />
-      </div>
-      <div class="field">
-        <label>Platform ID</label>
-        <input id="newExternalId" placeholder="Page ID / phone number ID / mailbox" />
-      </div>
-    </div>
-    <div class="grid">${spec.fields.map(f => fieldHtml(f, 'newcred')).join('')}</div>`;
-}
-
-async function saveAccount(id) {
-  const a = channels.accounts.find(x => x.id === id);
-  const credentials = {};
-  document.querySelectorAll(`[data-cred-${id}]`).forEach(i => credentials[i.getAttribute(`data-cred-${id}`)] = i.value);
-  const meta = {};
-  document.querySelectorAll(`[data-meta-${id}]`).forEach(i => meta[i.getAttribute(`data-meta-${id}`)] = i.value);
-  try {
-    await api('/api/channels', {
-      method:'POST', headers:{'content-type':'application/json'},
-      body: JSON.stringify({ id, orgId, channelType: a.channelType, credentialSource: a.credentialSource,
-                             externalId: meta.externalId, displayName: meta.displayName, credentials }),
-    });
-    await loadChannels(); toast('Channel saved');
-  } catch (e) { alert(e.message); }
-}
-
-async function removeAccount(id) {
-  if (!confirm('Remove this channel and its conversations?')) return;
-  await api(`/api/channels/${id}`, { method:'DELETE' });
-  await loadChannels(); toast('Channel removed');
-}
-
-$('#addChannel').onclick = async () => {
-  const channelType = $('#newChannelType').value;
-  const credentials = {};
-  document.querySelectorAll('[data-newcred]').forEach(i => credentials[i.getAttribute('data-newcred')] = i.value);
-  try {
-    await api('/api/channels', {
-      method:'POST', headers:{'content-type':'application/json'},
-      body: JSON.stringify({
-        orgId, channelType,
-        credentialSource: ['messenger','instagram','whatsapp'].includes(channelType) ? 'oauth_via_us' : 'byo_keys',
-        externalId: $('#newExternalId').value, displayName: $('#newName').value || channelType, credentials }),
-    });
-    await loadChannels(); renderNewForm();
-    $('#newName').value = ''; $('#newExternalId').value = '';
-    toast('Channel connected');
-  } catch (e) { alert(e.message); }
-};
-
-// ---------- boot ----------
-$('#whMeta').textContent = location.origin + '/webhooks/meta';
-$('#whLine').textContent = location.origin + '/webhooks/line';
+$('#whMeta').textContent  = location.origin + '/webhooks/meta';
+$('#whLine').textContent  = location.origin + '/webhooks/line';
 $('#whEmail').textContent = location.origin + '/webhooks/email?secret=YOUR_SECRET';
 
-$('#expandAll').onclick = () => {
-  channels.accounts.forEach(a => openChannels.add(a.id));
-  document.querySelectorAll('details.chan').forEach(d => d.open = true);
-};
-$('#collapseAll').onclick = () => {
-  openChannels.clear();
-  document.querySelectorAll('details.chan').forEach(d => d.open = false);
-};
-
-(async () => { await loadOrgs(); await loadSettings(); await loadChannels(); })();
+(async () => {
+  await mountShell({ active: '/', manageOrgs: true });
+  await loadSettings();
+})();
 </script>
 </body>
 </html>

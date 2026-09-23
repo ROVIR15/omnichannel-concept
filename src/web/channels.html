@@ -1,0 +1,427 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Channels</title>
+<link rel="stylesheet" href="/web/shell.css" />
+<style>
+  main { max-width:900px; margin:0 auto; padding:24px 20px 64px; }
+  section { margin-bottom:36px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 12px; }
+
+  /* channel picker */
+  .picker { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px; }
+  .pick {
+    padding:8px 14px; border:1px solid var(--line); border-radius:9px;
+    background:transparent; color:inherit; cursor:pointer; font:inherit; text-transform:capitalize;
+  }
+  .pick:hover { border-color:var(--accent); }
+  .pick.on { border-color:var(--accent); background:#2563eb12; color:var(--accent); font-weight:600; }
+
+  /* how-to-connect options */
+  .methods { display:grid; gap:10px; margin-bottom:18px; }
+  .method {
+    border:1px solid var(--line); border-radius:10px; padding:13px 15px;
+    cursor:pointer; display:flex; gap:11px; align-items:flex-start;
+  }
+  .method:hover { border-color:var(--accent); }
+  .method.on { border-color:var(--accent); background:#2563eb0d; }
+  .method.off { opacity:.55; cursor:not-allowed; }
+  .method input { width:auto; margin:3px 0 0; flex:0 0 auto; }
+  .method .m-title { font-weight:640; }
+  .method .m-hint { font-size:12px; color:var(--muted); margin-top:2px; }
+  .method .m-tag { margin-left:auto; flex:0 0 auto; }
+
+  .status { margin-top:12px; font-size:13px; padding:9px 12px; border-radius:8px; display:none; }
+  .status.show { display:block; }
+  .status.ok { background:#16a34a1a; color:var(--ok); }
+  .status.err { background:#dc26261a; color:var(--bad); }
+  .status.busy { background:#00000010; color:var(--muted); }
+
+  /* connected list */
+  details.chan { border:1px solid var(--line); border-radius:10px; background:var(--card); margin-bottom:10px; overflow:hidden; }
+  details.chan > summary { list-style:none; cursor:pointer; padding:12px 16px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  details.chan > summary::-webkit-details-marker { display:none; }
+  details.chan > summary:hover { background:#00000008; }
+  details.chan[open] > summary { border-bottom:1px solid var(--line); }
+  .chev { display:inline-block; transition:transform .15s; color:var(--muted); font-size:11px; }
+  details.chan[open] > summary .chev { transform:rotate(90deg); }
+  .chan-title { font-weight:650; }
+  .summary-id { font-size:12px; color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .summary-caps { margin-left:auto; font-size:11px; color:var(--muted); }
+  .chan-body { padding:16px; }
+  @media (max-width:640px){ .summary-caps { margin-left:0; width:100%; } }
+</style>
+</head>
+<body>
+
+<main>
+  <section>
+    <div class="row spread" style="margin-bottom:12px">
+      <h2 style="margin:0">Connected</h2>
+      <div class="row" style="gap:6px">
+        <button class="ghost small" id="expandAll">Expand all</button>
+        <button class="ghost small" id="collapseAll">Collapse all</button>
+      </div>
+    </div>
+    <div id="channels"></div>
+  </section>
+
+  <section>
+    <h2>Connect a channel</h2>
+    <div class="picker" id="picker"></div>
+    <div class="card">
+      <div id="methods" class="methods"></div>
+      <div id="methodBody"></div>
+      <div class="status" id="connectStatus"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/web/shell.js"></script>
+<script>
+// How each channel can be connected. The server exposes one way to store an
+// account (/api/channels); these are the different routes a person takes to
+// get there. `ready:false` means the UI exists but the server route behind it
+// does not yet — shown rather than hidden, so the gap is visible.
+const CONNECT_METHODS = {
+  whatsapp: [
+    { id:'meta_signup', title:'Connect with Meta', ready:false,
+      hint:'The client approves in Meta’s popup and never sees an access token. Needs POST /api/connect/whatsapp (src/oauth.ts is written, not routed).' },
+    { id:'manual', title:'Paste credentials', ready:true,
+      hint:'Enter the phone number ID and access token from the Meta app dashboard.' },
+  ],
+  messenger: [
+    { id:'meta_login', title:'Connect with Facebook', ready:true,
+      hint:'Facebook Login for Business, then subscribe this app to the Page.' },
+    { id:'manual', title:'Paste credentials', ready:true, hint:'Page ID plus a Page access token.' },
+  ],
+  instagram: [
+    { id:'meta_login', title:'Connect with Facebook', ready:true,
+      hint:'Instagram Direct rides on the linked Facebook Page.' },
+    { id:'manual', title:'Paste credentials', ready:true, hint:'Instagram account ID plus the Page access token.' },
+  ],
+  line: [
+    { id:'manual', title:'Paste credentials', ready:true,
+      hint:'Channel ID, channel secret and access token from the LINE Developers console.' },
+  ],
+  email: [
+    { id:'gmail', title:'Connect Gmail', ready:true,
+      hint:'Google OAuth, read and send only. One mailbox per organisation.' },
+    { id:'manual', title:'Inbound webhook', ready:true,
+      hint:'Point your mail provider at this app’s email webhook and store the shared secret.' },
+  ],
+};
+
+let channels = { accounts: [], catalogue: [] };
+let gmail = { configured:false, connected:false };
+// Facebook: `session` points at Page tokens held on the server after the
+// OAuth callback; the browser only ever sees ids and names.
+let facebook = { configured:false, session:'', pages:null };
+let pickedChannel = '';
+let pickedMethod = '';
+const openChannels = new Set();
+
+function setStatus(msg, kind) {
+  const n = $('#connectStatus');
+  if (!msg) { n.className = 'status'; return; }
+  n.className = 'status show ' + kind;
+  n.textContent = msg;
+}
+
+// ---------- connected list ----------
+async function loadChannels() {
+  channels = await api(`/api/channels?org=${encodeURIComponent(orgId)}`);
+
+  $('#channels').innerHTML = channels.accounts.map(a => `
+    <details class="chan" data-account="${a.id}" ${openChannels.has(a.id) ? 'open' : ''}>
+      <summary>
+        <span class="chev" aria-hidden="true">▸</span>
+        <span class="chan-title">${esc(a.displayName)}</span>
+        <span class="badge">${a.channelType}</span>
+        <span class="badge ${a.status}">${a.status}</span>
+        <span class="summary-id">${esc(a.externalId)}</span>
+        <span class="summary-caps">
+          ${a.capabilities.hasSessionWindow ? `${a.capabilities.sessionWindowHours}h window` : 'no window'}
+          · ${a.capabilities.maxTextLength} chars${a.capabilities.supportsTemplates ? ' · templates' : ''}
+        </span>
+      </summary>
+      <div class="chan-body">
+        <div class="grid">
+          <div class="field">
+            <label>Display name</label>
+            <input data-meta-${a.id}="displayName" value="${esc(a.displayName)}" />
+          </div>
+          <div class="field">
+            <label>Platform ID</label>
+            <input data-meta-${a.id}="externalId" value="${esc(a.externalId)}" />
+            <div class="help">Page ID · IG account ID · WhatsApp phone number ID · LINE channel ID · mailbox address</div>
+          </div>
+        </div>
+        <div class="grid">
+          ${a.fields.map(f => fieldHtml(f, `data-cred-${a.id}`, f.value, f.configured)).join('')}
+        </div>
+        <div class="row" style="justify-content:flex-end; gap:8px">
+          <button class="danger" data-del="${a.id}">Remove</button>
+          <button data-save="${a.id}">Save</button>
+        </div>
+      </div>
+    </details>`).join('') || '<div class="card sub">No channels connected to this organisation yet.</div>';
+
+  // Remember which panels were open, so a save or refresh does not collapse them.
+  $$('details.chan').forEach(d => d.addEventListener('toggle', () => {
+    d.open ? openChannels.add(d.dataset.account) : openChannels.delete(d.dataset.account);
+  }));
+  $$('[data-save]').forEach(b => b.onclick = () => saveAccount(b.dataset.save));
+  $$('[data-del]').forEach(b => b.onclick = () => removeAccount(b.dataset.del));
+}
+
+async function saveAccount(id) {
+  const a = channels.accounts.find(x => x.id === id);
+  const credentials = {}, meta = {};
+  $$(`[data-cred-${id}]`).forEach(i => credentials[i.getAttribute(`data-cred-${id}`)] = i.value);
+  $$(`[data-meta-${id}]`).forEach(i => meta[i.getAttribute(`data-meta-${id}`)] = i.value);
+  try {
+    await jsonPost('/api/channels', {
+      id, orgId, channelType: a.channelType, credentialSource: a.credentialSource,
+      externalId: meta.externalId, displayName: meta.displayName, credentials,
+    });
+    await loadChannels();
+    toast('Channel saved');
+  } catch (e) { alert(e.message); }
+}
+
+async function removeAccount(id) {
+  if (!confirm('Remove this channel and its conversations?')) return;
+  await api(`/api/channels/${id}`, { method:'DELETE' });
+  await loadChannels();
+  toast('Channel removed');
+}
+
+$('#expandAll').onclick = () => {
+  channels.accounts.forEach(a => openChannels.add(a.id));
+  $$('details.chan').forEach(d => d.open = true);
+};
+$('#collapseAll').onclick = () => {
+  openChannels.clear();
+  $$('details.chan').forEach(d => d.open = false);
+};
+
+// ---------- connect flow: channel → method → form ----------
+function renderPicker() {
+  $('#picker').innerHTML = channels.catalogue.map(c =>
+    `<button class="pick ${c.channelType === pickedChannel ? 'on' : ''}" data-pick="${c.channelType}">${c.channelType}</button>`).join('');
+  $$('[data-pick]').forEach(b => b.onclick = () => {
+    pickedChannel = b.dataset.pick;
+    pickedMethod = '';
+    setStatus('');
+    renderPicker();
+    renderMethods();
+  });
+}
+
+function renderMethods() {
+  const list = CONNECT_METHODS[pickedChannel] || [{ id:'manual', title:'Paste credentials', ready:true, hint:'' }];
+  if (!pickedMethod) pickedMethod = (list.find(m => m.ready) || list[0]).id;
+
+  $('#methods').innerHTML = list.map(m => `
+    <label class="method ${m.id === pickedMethod ? 'on' : ''} ${m.ready ? '' : 'off'}">
+      <input type="radio" name="method" value="${m.id}" ${m.id === pickedMethod ? 'checked' : ''} ${m.ready ? '' : 'disabled'} />
+      <span>
+        <span class="m-title">${esc(m.title)}</span>
+        <span class="m-hint">${esc(m.hint)}</span>
+      </span>
+      ${m.ready ? '' : '<span class="badge m-tag">not wired yet</span>'}
+    </label>`).join('');
+
+  $$('input[name=method]').forEach(r => r.onchange = () => {
+    pickedMethod = r.value;
+    setStatus('');
+    renderMethods();
+  });
+  renderMethodBody();
+}
+
+function renderMethodBody() {
+  const body = $('#methodBody');
+  if (pickedMethod === 'gmail') return renderGmailBody(body);
+  if (pickedMethod === 'meta_login') return renderFacebookBody(body);
+  if (!CONNECT_METHODS[pickedChannel]?.find(m => m.id === pickedMethod)?.ready) { body.innerHTML = ''; return; }
+  renderManualBody(body);
+}
+
+function renderManualBody(body) {
+  const spec = channels.catalogue.find(c => c.channelType === pickedChannel);
+  if (!spec) { body.innerHTML = ''; return; }
+  body.innerHTML = `
+    <div class="grid">
+      <div class="field">
+        <label>Display name</label>
+        <input id="newName" placeholder="e.g. Acme Support Line" />
+      </div>
+      <div class="field">
+        <label>Platform ID</label>
+        <input id="newExternalId" placeholder="Page ID / phone number ID / mailbox" />
+      </div>
+    </div>
+    <div class="grid">${spec.fields.map(f => fieldHtml(f, 'data-newcred')).join('')}</div>
+    <button id="addChannel">Connect channel</button>`;
+
+  $('#addChannel').onclick = async () => {
+    const credentials = {};
+    $$('[data-newcred]').forEach(i => credentials[i.getAttribute('data-newcred')] = i.value);
+    try {
+      await jsonPost('/api/channels', {
+        orgId, channelType: pickedChannel,
+        credentialSource: ['messenger','instagram','whatsapp'].includes(pickedChannel) ? 'oauth_via_us' : 'byo_keys',
+        externalId: $('#newExternalId').value,
+        displayName: $('#newName').value || pickedChannel,
+        credentials,
+      });
+      await loadChannels();
+      renderMethodBody();
+      setStatus('Channel connected.', 'ok');
+      toast('Channel connected');
+    } catch (e) { setStatus('Could not connect: ' + e.message, 'err'); }
+  };
+}
+
+function renderGmailBody(body) {
+  if (!gmail.configured) {
+    body.innerHTML = `<div class="sub">Save the Google OAuth client ID, secret and redirect URI on
+      <a href="/">Settings</a> before connecting a mailbox.</div>`;
+    return;
+  }
+  body.innerHTML = gmail.connected
+    ? `<div class="row spread">
+         <div>
+           <div style="font-weight:640">${esc(gmail.emailAddress)} <span class="badge connected">connected</span></div>
+           <div class="sub">Reading the last 20 INBOX messages and sending as this address.</div>
+         </div>
+         <div class="row" style="gap:8px">
+           <button class="ghost" id="gmailReconnect">Reconnect</button>
+           <button class="danger" id="gmailLogout">Log out</button>
+         </div>
+       </div>`
+    : `<div class="row spread">
+         <div class="sub">You will be sent to Google, then returned to the Inbox with the mailbox synced.</div>
+         <button id="gmailConnect">Connect Gmail</button>
+       </div>`;
+
+  const go = () => { location.href = `/api/integrations/gmail/connect?org=${encodeURIComponent(orgId)}`; };
+  if ($('#gmailConnect')) $('#gmailConnect').onclick = go;
+  if ($('#gmailReconnect')) $('#gmailReconnect').onclick = go;
+  if ($('#gmailLogout')) $('#gmailLogout').onclick = async () => {
+    if (!confirm(`Log out ${gmail.emailAddress || 'this Gmail account'}? Existing inbox history will be kept.`)) return;
+    try {
+      await jsonPost('/api/integrations/gmail/disconnect', { orgId });
+      await refresh();
+      toast('Gmail logged out');
+    } catch (e) { setStatus(e.message, 'err'); }
+  };
+}
+
+function renderFacebookBody(body) {
+  if (!facebook.configured) {
+    body.innerHTML = `<div class="sub">Save the Meta App ID and App Secret on
+      <a href="/">Settings</a> before connecting with Facebook.</div>`;
+    return;
+  }
+  const go = () => {
+    location.href = `/api/integrations/facebook/connect?org=${encodeURIComponent(orgId)}&channel=${pickedChannel}`;
+  };
+  const isIg = pickedChannel === 'instagram';
+
+  if (!facebook.pages) {
+    body.innerHTML = `
+      <div class="row spread">
+        <div class="sub">You will be sent to Facebook to choose which Pages to share${isIg ? ' — pick the Page linked to your Instagram professional account' : ''}, then returned here to pick one.</div>
+        <button id="fbConnect">Connect with Facebook</button>
+      </div>`;
+    $('#fbConnect').onclick = go;
+    return;
+  }
+
+  const rows = facebook.pages.map(p => {
+    const usable = !isIg || p.instagram;
+    const done = p.connected[pickedChannel];
+    const label = isIg
+      ? (p.instagram ? `@${esc(p.instagram.username || p.instagram.id)} <span class="sub">via ${esc(p.name)}</span>` : `${esc(p.name)} <span class="sub">— no Instagram account linked</span>`)
+      : `${esc(p.name)} <span class="summary-id">${esc(p.id)}</span>`;
+    return `
+      <div class="row spread" style="padding:8px 0; border-top:1px solid var(--line)">
+        <div>${label}</div>
+        ${done ? '<span class="badge active">connected</span>'
+               : `<button class="small" data-fbpage="${esc(p.id)}" ${usable ? '' : 'disabled'}>Connect</button>`}
+      </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div class="row spread" style="margin-bottom:6px">
+      <div class="sub">Pages shared with this app. Pick the one this organisation should receive messages for.</div>
+      <button class="ghost small" id="fbRestart">Log in again</button>
+    </div>
+    ${rows}`;
+  $('#fbRestart').onclick = go;
+  $$('[data-fbpage]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    setStatus('Subscribing the Page to webhooks…', 'busy');
+    try {
+      const a = await jsonPost('/api/integrations/facebook/pages',
+        { session: facebook.session, orgId, pageId: b.dataset.fbpage, channel: pickedChannel });
+      await loadFacebookPages();
+      await loadChannels();
+      renderMethodBody();
+      setStatus(`Connected ${a.displayName}.`, 'ok');
+      toast('Channel connected');
+    } catch (e) { b.disabled = false; setStatus('Could not connect: ' + e.message, 'err'); }
+  });
+}
+
+async function loadFacebookPages() {
+  if (!facebook.session) { facebook.pages = null; return; }
+  try {
+    const r = await api(`/api/integrations/facebook/pages?session=${encodeURIComponent(facebook.session)}&org=${encodeURIComponent(orgId)}`);
+    facebook.pages = r.pages;
+  } catch (e) {
+    facebook = { ...facebook, session:'', pages:null };
+    setStatus(e.message, 'err');
+  }
+}
+
+// ---------- boot ----------
+async function refresh() {
+  await loadChannels();
+  try { gmail = await api(`/api/integrations/gmail/status?org=${encodeURIComponent(orgId)}`); }
+  catch { gmail = { configured:false, connected:false }; }
+  try { facebook.configured = (await api('/api/integrations/facebook/status')).configured; }
+  catch { facebook.configured = false; }
+  await loadFacebookPages();
+  if (!pickedChannel) pickedChannel = channels.catalogue[0]?.channelType || '';
+  renderPicker();
+  renderMethods();
+}
+
+// A login belongs to the organisation it was started for.
+window.addEventListener('orgchange', () => { facebook = { ...facebook, session:'', pages:null }; refresh(); });
+
+(async () => {
+  await mountShell({ active: '/channels' });
+  const org = new URLSearchParams(location.search).get('org');
+  if (org) { orgId = org; localStorage.setItem('orgId', orgId); await loadOrgs(); }
+
+  // Returning from the Facebook OAuth callback.
+  const q = new URLSearchParams(location.search);
+  if (q.has('fb') || q.has('fb_error')) {
+    pickedChannel = q.get('channel') || 'messenger';
+    pickedMethod = 'meta_login';
+    facebook.session = q.get('fb') || '';
+    history.replaceState(null, '', '/channels');
+  }
+  await refresh();
+  if (q.has('fb_error')) setStatus(q.get('fb_error'), 'err');
+})();
+</script>
+</body>
+</html>

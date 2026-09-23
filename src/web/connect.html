@@ -1,0 +1,215 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Playground Aza</title>
+<style>
+  :root { color-scheme: light dark; --line:#0002; --muted:#0009; --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; --card:#00000006; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; }
+  header h1 { font-size:15px; margin:0; font-weight:700; }
+  nav { margin-left:auto; }
+  nav a { color:var(--muted); text-decoration:none; margin-left:14px; font-size:13px; }
+  nav a:hover { color:var(--accent); }
+  main { max-width:660px; margin:0 auto; padding:32px 20px 64px; }
+  h2 { font-size:20px; margin:0 0 6px; letter-spacing:-.01em; }
+  .lede { color:var(--muted); margin:0 0 28px; }
+  .card { border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:16px; background:var(--card); }
+  .card h3 { margin:0 0 4px; font-size:16px; }
+  .card p { margin:0 0 16px; color:var(--muted); font-size:14px; }
+  button { padding:11px 18px; border:0; border-radius:9px; background:var(--accent); color:#fff; cursor:pointer; font:inherit; font-weight:600; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.wa { background:#25D366; color:#06301a; }
+  .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  select { padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
+  .status { margin-top:14px; font-size:14px; padding:10px 12px; border-radius:8px; display:none; }
+  .status.show { display:block; }
+  .status.ok { background:#16a34a1a; color:var(--ok); }
+  .status.err { background:#dc26261a; color:var(--bad); }
+  .status.busy { background:#00000010; color:var(--muted); }
+  .connected { display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .connected:last-child { border-bottom:0; }
+  .badge { font-size:10px; text-transform:uppercase; letter-spacing:.05em; padding:2px 7px; border-radius:5px; background:#16a34a22; color:var(--ok); }
+  .note { font-size:13px; color:var(--muted); border-left:2px solid var(--line); padding-left:12px; margin-top:22px; }
+  code { background:#00000010; padding:1px 5px; border-radius:4px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Playground Aza</h1>
+  <div class="row" style="gap:6px">
+    <span style="font-size:12px;color:var(--muted)">Organisation</span>
+    <select id="orgSelect"></select>
+  </div>
+  <nav>
+    <a href="/">Settings</a>
+    <a href="/inbox">Inbox</a>
+  </nav>
+</header>
+
+<main>
+  <h2>Bring your messaging into one inbox</h2>
+  <p class="lede">
+    Connect the accounts your customers already message you on. You stay the owner
+    of every account — access can be revoked at any time from your Meta settings.
+  </p>
+
+  <div class="card">
+    <h3>WhatsApp Business</h3>
+    <p>
+      Connect your WhatsApp Business Account so messages from customers arrive in
+      your shared inbox and your team can reply from one place.
+    </p>
+    <button class="wa" id="btnWhatsApp">Connect WhatsApp</button>
+    <div class="status" id="waStatus"></div>
+  </div>
+
+  <div class="card">
+    <h3>Facebook Page &amp; Instagram</h3>
+    <p>
+      Connect a Facebook Page to receive Messenger conversations, and the
+      Instagram account linked to it for Direct messages.
+    </p>
+    <button id="btnFacebook">Connect Facebook</button>
+    <div class="status" id="fbStatus"></div>
+  </div>
+
+  <div class="card">
+    <h3>Connected</h3>
+    <div id="connected"><p style="margin:0">Nothing connected yet.</p></div>
+  </div>
+
+  <div class="note">
+    We only request permission to send and receive messages on the accounts you
+    choose. We never post to your timeline, and we don't read anything other than
+    the conversations shown in your inbox. Disconnect at any time.
+  </div>
+</main>
+
+<script>
+let orgs = [], orgId = localStorage.getItem('orgId') || '';
+let appId = '', waConfigId = '', loginConfigId = '';
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function status(el, msg, kind) {
+  const n = $(el);
+  n.className = 'status show ' + kind;
+  n.textContent = msg;
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
+async function boot() {
+  orgs = await api('/api/orgs');
+  if (!orgs.find(o => o.id === orgId)) orgId = orgs[0]?.id || '';
+  localStorage.setItem('orgId', orgId);
+  $('#orgSelect').innerHTML = orgs.map(o =>
+    `<option value="${o.id}" ${o.id === orgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
+
+  const cfg = await api('/api/connect-config');
+  appId = cfg.appId; waConfigId = cfg.whatsappConfigId; loginConfigId = cfg.loginConfigId;
+
+  if (!appId) {
+    status('#waStatus', 'Meta App ID is not configured in provider settings.', 'err');
+    status('#fbStatus', 'Meta App ID is not configured in provider settings.', 'err');
+    $('#btnWhatsApp').disabled = true; $('#btnFacebook').disabled = true;
+    return;
+  }
+  if (!waConfigId) {
+    status('#waStatus', 'Embedded Signup config ID missing — set it in provider settings.', 'err');
+    $('#btnWhatsApp').disabled = true;
+  }
+  loadSDK();
+  await loadConnected();
+}
+
+$('#orgSelect').onchange = e => {
+  orgId = e.target.value; localStorage.setItem('orgId', orgId); loadConnected();
+};
+
+function loadSDK() {
+  window.fbAsyncInit = () => FB.init({ appId, autoLogAppEvents: true, xfbml: false, version: 'v26.0' });
+  const s = document.createElement('script');
+  s.src = 'https://connect.facebook.net/en_US/sdk.js';
+  s.async = true; s.defer = true; s.crossOrigin = 'anonymous';
+  document.head.appendChild(s);
+}
+
+// Embedded Signup reports the WABA and phone number ids through postMessage;
+// FB.login's callback carries only the OAuth code. Both halves are needed.
+let signupData = null;
+window.addEventListener('message', ev => {
+  if (ev.origin !== 'https://www.facebook.com') return;
+  try {
+    const d = JSON.parse(ev.data);
+    if (d.type === 'WA_EMBEDDED_SIGNUP' && d.event === 'FINISH') {
+      signupData = { wabaId: d.data.waba_id, phoneNumberId: d.data.phone_number_id };
+    }
+  } catch {}
+});
+
+$('#btnWhatsApp').onclick = () => {
+  signupData = null;
+  status('#waStatus', 'Opening Meta sign-up…', 'busy');
+  FB.login(async response => {
+    const code = response?.authResponse?.code;
+    if (!code) { status('#waStatus', 'Sign-up was cancelled.', 'err'); return; }
+    if (!signupData) { status('#waStatus', 'Sign-up did not return an account — please try again.', 'err'); return; }
+
+    status('#waStatus', 'Finishing setup…', 'busy');
+    try {
+      const r = await api('/api/connect/whatsapp', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orgId, code, ...signupData }),
+      });
+      status('#waStatus', `Connected: ${r.account.displayName}`, 'ok');
+      await loadConnected();
+    } catch (e) {
+      status('#waStatus', 'Could not connect: ' + e.message, 'err');
+    }
+  }, {
+    config_id: waConfigId,
+    response_type: 'code',
+    override_default_response_type: true,
+    // Shape per Meta's Embedded Signup docs. `setup` can prefill the client's
+    // business details; leaving the fields null makes the client enter them.
+    extras: {
+      version: 'v4',
+      setup: {
+        business: { id: null, name: null, email: null, phone: { code: null, number: null } },
+        website: null,
+        address: { streetAddress1: null, streetAddress2: null, city: null, state: null, zipPostal: null, country: null },
+      },
+    },
+  });
+};
+
+$('#btnFacebook').onclick = () => {
+  status('#fbStatus', 'Facebook Page connect is not wired up yet — use Settings to paste credentials.', 'busy');
+};
+
+async function loadConnected() {
+  const data = await api(`/api/channels?org=${encodeURIComponent(orgId)}`);
+  const active = data.accounts.filter(a => a.status === 'active');
+  $('#connected').innerHTML = active.length
+    ? active.map(a => `
+        <div class="connected">
+          <span>${esc(a.displayName)} <span style="color:var(--muted)">· ${a.channelType}</span></span>
+          <span class="badge">connected</span>
+        </div>`).join('')
+    : '<p style="margin:0">Nothing connected yet.</p>';
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -13,7 +13,10 @@ make demo        # starts the server, sends sample traffic, opens the console
 make help        # everything else
 ```
 
-- **Console** → `http://localhost:12301/` — organisations, provider settings, channel credentials
+Three pages, split by who is doing the work:
+
+- **Settings** → `http://localhost:12301/` — organisations and the provider apps *you* own
+- **Channels** → `http://localhost:12301/channels` — what each *client* connects, one channel at a time
 - **Inbox** → `http://localhost:12301/inbox` — conversations, replies, new outbound threads
 
 No credentials needed to try it. Channels seed as `pending` with dev ids, and a
@@ -64,8 +67,8 @@ a tunnel.
 
 ### Test receiving
 
-1. Start the app and open `/inbox`.
-2. Select the target organisation and click **Connect Gmail**.
+1. Start the app and open `/channels`.
+2. Select the target organisation, pick **email**, then **Connect Gmail**.
 3. Grant access at Google; the callback returns to the Inbox and performs the
    initial sync.
 4. Send an email from a different account to the connected address.
@@ -94,6 +97,29 @@ the public URL changes on every restart, and every change means re-pasting the
 callback URL into the Meta dashboard — which is a reliable source of silent
 webhook failures.
 
+## Facebook Login (Messenger + Instagram)
+
+On **Channels**, pick **messenger** or **instagram**, then **Connect with
+Facebook**. The client is sent to Facebook, grants access to one or more Pages,
+and returns to Channels to pick the Page this organisation should receive. The
+server exchanges the code for a long-lived token, reads the Page tokens,
+subscribes the app to the Page (`/{page-id}/subscribed_apps`) and stores an
+active channel. Instagram uses the professional account linked to that Page.
+
+### Meta app setup
+
+1. In the Meta app, add **Facebook Login for Business**. Optionally create a
+   configuration with the Messenger/Instagram messaging permissions and copy
+   its ID; without one, the classic scopes are requested.
+2. Under **Valid OAuth Redirect URIs**, add
+   `https://<your-tunnel>/api/integrations/facebook/callback`. Facebook only
+   accepts HTTPS, so run `make tunnel` and open the console through the tunnel.
+3. On **Settings** → Meta, save the App ID, App Secret, and optionally the
+   **Facebook Login Config ID** and **Facebook OAuth Redirect URI** (blank =
+   derived from the tunnel's forwarded host).
+4. While the app is in development mode, only people with a role on the app
+   can log in.
+
 ## Layout
 
 ```
@@ -112,8 +138,11 @@ src/
   integrations/
     gmail.ts          OAuth, token refresh, Inbox import, and Gmail API sending
   web/
-    index.html        console: organisations, secrets, collapsible channel setup
-    inbox.html        agent inbox: org switcher, replies, new conversations
+    shell.css         shared tokens, header and controls for every page
+    shell.js          shared header, org picker and fetch helpers
+    index.html        settings: organisations and provider apps, grouped
+    channels.html     per-client channel setup: pick a channel, pick how to connect
+    inbox.html        agent inbox: replies, new conversations, Gmail sync
 ```
 
 ## Two levels of credentials
