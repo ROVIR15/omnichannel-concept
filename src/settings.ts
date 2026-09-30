@@ -17,6 +17,12 @@ export const APP_SETTING_FIELDS: CredentialField[] = [
   { key: "google_oauth_client_id", label: "Google OAuth Client ID", secret: false, help: "Google Cloud → APIs & Services → Credentials" },
   { key: "google_oauth_client_secret", label: "Google OAuth Client Secret", secret: true, help: "Stored server-side and never returned to the browser." },
   { key: "google_oauth_redirect_uri", label: "Google OAuth Redirect URI", secret: false, help: "Must exactly match Google Cloud, e.g. https://your-host/api/integrations/gmail/callback" },
+  { key: "twilio_account_sid", label: "Twilio Account SID", secret: false, help: "Twilio Console → Account Info. Starts with AC. The main account that owns every client subaccount." },
+  { key: "twilio_auth_token", label: "Twilio Auth Token", secret: true, help: "Signs every Twilio webhook and authorises API calls. Blank = signature check skipped." },
+  { key: "twilio_api_key_sid", label: "Twilio API Key SID", secret: false, help: "Console → API keys & tokens. Starts with SK. Used to issue browser calling tokens for agents." },
+  { key: "twilio_api_key_secret", label: "Twilio API Key Secret", secret: true, help: "Shown once when the key is created in Twilio." },
+  { key: "twilio_twiml_app_sid", label: "Twilio TwiML App SID", secret: false, help: "Console → Voice → TwiML Apps. Starts with AP. Its Voice URL must point at the voice webhook below." },
+  { key: "twilio_outbound_countries", label: "Allowed Outbound Countries", secret: false, help: "Comma-separated ISO codes, e.g. US,CA,ID. Blocks calls to expensive destinations. Blank = no calls allowed yet." },
 ];
 
 const ENV_FALLBACK: Record<string, string> = {
@@ -30,6 +36,12 @@ const ENV_FALLBACK: Record<string, string> = {
   google_oauth_client_id: "GOOGLE_OAUTH_CLIENT_ID",
   google_oauth_client_secret: "GOOGLE_OAUTH_CLIENT_SECRET",
   google_oauth_redirect_uri: "GOOGLE_OAUTH_REDIRECT_URI",
+  twilio_account_sid: "TWILIO_ACCOUNT_SID",
+  twilio_auth_token: "TWILIO_AUTH_TOKEN",
+  twilio_api_key_sid: "TWILIO_API_KEY_SID",
+  twilio_api_key_secret: "TWILIO_API_KEY_SECRET",
+  twilio_twiml_app_sid: "TWILIO_TWIML_APP_SID",
+  twilio_outbound_countries: "TWILIO_OUTBOUND_COUNTRIES",
 };
 
 export function appSetting(key: string): string {
