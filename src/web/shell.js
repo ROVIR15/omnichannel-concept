@@ -13,9 +13,10 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&l
 
 // Setup lives on Channels and Settings; Inbox is the day-to-day page.
 const NAV = [
-  { href: '/channels', label: 'Channels' },
-  { href: '/inbox',    label: 'Inbox' },
-  { href: '/',         label: 'Settings' },
+  { href: '/channels',    label: 'Channels' },
+  { href: '/inbox',       label: 'Inbox' },
+  { href: '/permissions', label: 'Permissions' },
+  { href: '/',            label: 'Settings' },
 ];
 
 let orgs = [];

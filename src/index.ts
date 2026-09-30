@@ -183,6 +183,7 @@ const server = Bun.serve({
     if (path === "/" || path === "/settings" || path === "/console") return page("index.html");
     if (path === "/channels") return page("channels.html");
     if (path === "/inbox") return page("inbox.html");
+    if (path === "/permissions") return page("permissions.html");
     if (path === "/web/shell.css") return asset("shell.css");
     if (path === "/web/shell.js") return asset("shell.js");
 
