@@ -17,9 +17,15 @@ const GRAPH = () => `https://graph.facebook.com/${appSetting("meta_graph_version
 export interface EmbeddedSignupInput {
   orgId: string;
   code: string;
-  wabaId: string;
-  phoneNumberId: string;
+  /** From the popup's postMessage. Optional: when it never arrives, they are
+   *  looked up from the token instead. */
+  wabaId?: string;
+  phoneNumberId?: string;
   displayName?: string;
+  /** The page URL the popup was opened from; one redirect_uri candidate. */
+  pageUrl?: string;
+  /** The redirect_uri the JS SDK put in the popup URL, when the browser saw it. */
+  redirectUri?: string;
 }
 
 export interface ConnectResult {
@@ -35,9 +41,9 @@ async function exchangeCode(code: string, redirectUri?: string) {
   url.searchParams.set("client_id", appSetting("meta_app_id"));
   url.searchParams.set("client_secret", appSetting("meta_app_secret"));
   url.searchParams.set("code", code);
-  // The JS SDK popup has no redirect; the server redirect flow must repeat the
-  // exact redirect_uri it sent to the dialog, or the exchange is rejected.
-  if (redirectUri) url.searchParams.set("redirect_uri", redirectUri);
+  // The server redirect flow must repeat the exact redirect_uri it sent to the
+  // dialog. A code from the JS SDK popup has none — see exchangeSdkCode.
+  if (redirectUri !== undefined) url.searchParams.set("redirect_uri", redirectUri);
 
   const res = await fetch(url);
   const json: any = await res.json().catch(() => ({}));
@@ -45,6 +51,29 @@ async function exchangeCode(code: string, redirectUri?: string) {
     return { ok: false as const, error: json.error?.message ?? `HTTP ${res.status}` };
   }
   return { ok: true as const, token: json.access_token as string };
+}
+
+/** A JS SDK popup code carries a redirect_uri the SDK chose itself: an
+ *  xd_arbiter URL with per-page-load ids. The browser reads it from the popup
+ *  URL and sends it as `sdkRedirectUri`; the rest are fallbacks. A failed
+ *  exchange does not consume the code, so try each in turn. */
+async function exchangeSdkCode(code: string, pageUrl?: string, sdkRedirectUri?: string) {
+  const candidates: (string | undefined)[] = [...(sdkRedirectUri ? [sdkRedirectUri] : []), undefined, "", "https://www.facebook.com/connect/login_success.html"];
+  if (pageUrl) {
+    const u = new URL(pageUrl);
+    candidates.push(pageUrl, `${u.origin}${u.pathname}`, u.origin, `${u.origin}/`);
+  }
+  let last: Awaited<ReturnType<typeof exchangeCode>> = { ok: false, error: "no attempt made" };
+  for (const c of new Set(candidates)) {
+    last = await exchangeCode(code, c);
+    if (last.ok) {
+      console.log(`whatsapp code exchange ok with redirect_uri=${c === undefined ? "(absent)" : JSON.stringify(c)}`);
+      return last;
+    }
+    console.log(`whatsapp code exchange failed with redirect_uri=${c === undefined ? "(absent)" : JSON.stringify(c)}: ${last.error}`);
+  }
+  console.log(`whatsapp code exchange used client_id=${appSetting("meta_app_id")} graph=${appSetting("meta_graph_version") || "v26.0"}`);
+  return last;
 }
 
 /** Step 2: subscribe THIS app to the client's WABA, or no webhooks arrive.
@@ -63,6 +92,30 @@ async function subscribeToWaba(wabaId: string, token: string) {
   return { ok: true as const };
 }
 
+/** Fallback when the popup's postMessage is lost: the token's granted scopes
+ *  name the WABA, and the WABA lists its phone numbers. Takes the first number. */
+async function discoverWaba(token: string) {
+  const dbg = new URL(`${GRAPH()}/debug_token`);
+  dbg.searchParams.set("input_token", token);
+  dbg.searchParams.set("access_token", `${appSetting("meta_app_id")}|${appSetting("meta_app_secret")}`);
+  const res = await fetch(dbg);
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false as const, error: json.error?.message ?? `HTTP ${res.status}` };
+  const scope = (json.data?.granular_scopes ?? []).find((s: any) => s.scope === "whatsapp_business_management");
+  const wabaId = scope?.target_ids?.[0];
+  if (!wabaId) return { ok: false as const, error: "the token has no WhatsApp Business Account" };
+
+  const res2 = await fetch(`${GRAPH()}/${wabaId}/phone_numbers?fields=id`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const json2: any = await res2.json().catch(() => ({}));
+  const phoneNumberId = json2.data?.[0]?.id;
+  if (!res2.ok || !phoneNumberId) {
+    return { ok: false as const, error: json2.error?.message ?? "the WhatsApp Business Account has no phone number" };
+  }
+  return { ok: true as const, wabaId: String(wabaId), phoneNumberId: String(phoneNumberId) };
+}
+
 /** Optional: read the number back so the account has a human-readable name. */
 async function describeNumber(phoneNumberId: string, token: string) {
   const res = await fetch(
@@ -78,25 +131,33 @@ export async function completeWhatsAppSignup(input: EmbeddedSignupInput): Promis
     return { ok: false, step: "config", error: "Meta App Secret is not set in provider settings" };
   }
 
-  const exchanged = await exchangeCode(input.code);
+  const exchanged = await exchangeSdkCode(input.code, input.pageUrl, input.redirectUri);
   if (!exchanged.ok) return { ok: false, step: "token exchange", error: exchanged.error };
 
-  const subscribed = await subscribeToWaba(input.wabaId, exchanged.token);
+  let { wabaId, phoneNumberId } = input;
+  if (!wabaId || !phoneNumberId) {
+    const found = await discoverWaba(exchanged.token);
+    if (!found.ok) return { ok: false, step: "account lookup", error: found.error };
+    ({ wabaId, phoneNumberId } = found);
+  }
+
+  const subscribed = await subscribeToWaba(wabaId, exchanged.token);
   if (!subscribed.ok) return { ok: false, step: "waba subscription", error: subscribed.error };
 
-  const info = await describeNumber(input.phoneNumberId, exchanged.token);
+  const info = await describeNumber(phoneNumberId, exchanged.token);
   const label =
     input.displayName?.trim() ||
     (info?.verified_name ? `${info.verified_name} (${info.display_phone_number})` : "WhatsApp Business");
 
   const account = upsertAccount({
+    id: accountByExternal("whatsapp", phoneNumberId)?.id,
     orgId: input.orgId,
     channelType: "whatsapp",
     credentialSource: "oauth_via_us",
-    externalId: input.phoneNumberId,
+    externalId: phoneNumberId,
     displayName: label,
     status: "active",
-    credentials: { token: exchanged.token, wabaId: input.wabaId },
+    credentials: { token: exchanged.token, wabaId },
   });
 
   return { ok: true, account };

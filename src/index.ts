@@ -5,7 +5,7 @@ import { ingest, inbox, reply, startConversation } from "./core";
 import { signingSecrets } from "./connectors/meta";
 import { connectorFor } from "./registry";
 import {
-  completeFacebookLogin, connectFacebookPage, facebookConfigured, facebookLoginUrl, facebookPages,
+  completeFacebookLogin, completeWhatsAppSignup, connectFacebookPage, facebookConfigured, facebookLoginUrl, facebookPages,
   type FacebookChannel,
 } from "./oauth";
 import { seedIfEmpty } from "./seed";
@@ -395,6 +395,27 @@ const server = Bun.serve({
     if (chanMatch && method === "DELETE") {
       deleteAccount(chanMatch[1]!);
       return json({ ok: true });
+    }
+
+    // --- WhatsApp Embedded Signup -----------------------------------------
+    if (path === "/api/connect-config" && method === "GET") {
+      return json({
+        appId: appSetting("meta_app_id"),
+        whatsappConfigId: appSetting("meta_whatsapp_config_id"),
+        loginConfigId: appSetting("meta_login_config_id"),
+        graphVersion: appSetting("meta_graph_version") || "v26.0",
+      });
+    }
+
+    if (path === "/api/connect/whatsapp" && method === "POST") {
+      const b = await body<{ orgId?: string; code?: string; wabaId?: string; phoneNumberId?: string; displayName?: string; pageUrl?: string; redirectUri?: string }>(req);
+      if (!b?.orgId || !b.code) return json({ error: "orgId and code are required" }, 400);
+      const existing = b.phoneNumberId ? accountByExternal("whatsapp", b.phoneNumberId) : undefined;
+      if (existing && existing.orgId !== b.orgId) {
+        return json({ error: "that whatsapp number is already connected to another organisation" }, 409);
+      }
+      const r = await completeWhatsAppSignup({ ...b, orgId: b.orgId, code: b.code });
+      return r.ok ? json({ account: maskAccount(r.account!) }) : json({ error: `${r.step}: ${r.error}` }, 400);
     }
 
     // --- Facebook Login (Messenger + Instagram) ---------------------------

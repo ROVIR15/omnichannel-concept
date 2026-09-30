@@ -148,7 +148,7 @@ function loadSDK() {
 // FB.login's callback carries only the OAuth code. Both halves are needed.
 let signupData = null;
 window.addEventListener('message', ev => {
-  if (ev.origin !== 'https://www.facebook.com') return;
+  if (!/^https:\/\/(www|web)\.facebook\.com$/.test(ev.origin)) return;
   try {
     const d = JSON.parse(ev.data);
     if (d.type === 'WA_EMBEDDED_SIGNUP' && d.event === 'FINISH') {
@@ -157,26 +157,28 @@ window.addEventListener('message', ev => {
   } catch {}
 });
 
-$('#btnWhatsApp').onclick = () => {
-  signupData = null;
-  status('#waStatus', 'Opening Meta sign-up…', 'busy');
-  FB.login(async response => {
+async function finishSignup(response) {
     const code = response?.authResponse?.code;
     if (!code) { status('#waStatus', 'Sign-up was cancelled.', 'err'); return; }
-    if (!signupData) { status('#waStatus', 'Sign-up did not return an account — please try again.', 'err'); return; }
 
     status('#waStatus', 'Finishing setup…', 'busy');
     try {
       const r = await api('/api/connect/whatsapp', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ orgId, code, ...signupData }),
+        body: JSON.stringify({ orgId, code, pageUrl: location.href, ...(signupData || {}) }),
       });
       status('#waStatus', `Connected: ${r.account.displayName}`, 'ok');
       await loadConnected();
     } catch (e) {
       status('#waStatus', 'Could not connect: ' + e.message, 'err');
     }
-  }, {
+}
+
+$('#btnWhatsApp').onclick = () => {
+  signupData = null;
+  status('#waStatus', 'Opening Meta sign-up…', 'busy');
+  // FB.login rejects async callbacks; hand off to an async helper.
+  FB.login(response => { finishSignup(response); }, {
     config_id: waConfigId,
     response_type: 'code',
     override_default_response_type: true,
