@@ -110,6 +110,9 @@ export const messengerConnector: ChannelConnector = {
   handleVerification(req: WebhookRequest) {
     if (req.method !== "GET") return null;
     const p = req.url.searchParams;
+    // Plain GET, no hub.mode — a health check (curl, uptime monitor, ngrok
+    // browser hit), not Meta's subscribe handshake. Answer 200 instead of 403.
+    if (!p.has("hub.mode")) return new Response("ok", { status: 200 });
     if (
       p.get("hub.mode") === "subscribe" &&
       p.get("hub.verify_token") === appSetting("meta_verify_token")

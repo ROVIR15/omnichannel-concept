@@ -120,6 +120,21 @@ active channel. Instagram uses the professional account linked to that Page.
 4. While the app is in development mode, only people with a role on the app
    can log in.
 
+## WhatsApp Embedded Signup
+
+On **Channels**, pick **whatsapp**, then **Connect with Meta**. A Meta popup
+(JS SDK) lets the client pick or create a WhatsApp Business Account and phone
+number. The browser posts the returned code plus WABA and phone number ids to
+`POST /api/connect/whatsapp`; the server exchanges the code for a business
+token, subscribes the app to the WABA (`/{waba-id}/subscribed_apps`) and stores
+an active channel. The client never sees a token.
+
+Setup: in the Meta app, add **Facebook Login for Business**, create a
+configuration using the **WhatsApp Embedded Signup** variation, and save its ID
+on **Settings** → Meta as **WhatsApp Embedded Signup Config ID**. The console
+must be served from an HTTPS domain listed under the app's allowed domains for
+the JS SDK (`make tunnel`).
+
 ## Layout
 
 ```
@@ -170,6 +185,7 @@ the stored one untouched.
 | `GET/POST /api/orgs`, `PATCH/DELETE /api/orgs/:id` | organisations |
 | `GET/POST /api/settings` | provider settings |
 | `GET/POST /api/channels`, `DELETE /api/channels/:id` | channel accounts |
+| `GET /api/connect-config`, `POST /api/connect/whatsapp` | WhatsApp Embedded Signup config and completion |
 | `GET /api/integrations/gmail/connect`, `GET /api/integrations/gmail/callback` | Gmail OAuth flow |
 | `GET /api/integrations/gmail/status`, `GET /api/integrations/gmail/messages` | connection status and manual inbox sync |
 | `POST /api/integrations/gmail/disconnect` | revoke Gmail access and remove locally stored OAuth tokens |
