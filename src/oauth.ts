@@ -35,6 +35,56 @@ export interface ConnectResult {
   account?: ChannelAccount;
 }
 
+export interface DisconnectResult {
+  providerDisconnected: boolean;
+  warning?: string;
+}
+
+/** Stop Meta webhook delivery before the local account is removed. Tokens can
+ * expire or be revoked, so callers should still remove the local connection
+ * and surface the provider error as a warning instead of trapping the user. */
+export async function disconnectMetaAccount(account: ChannelAccount): Promise<DisconnectResult> {
+  let objectId = "";
+  let token = "";
+
+  if (account.channelType === "whatsapp") {
+    objectId = account.credentials.wabaId;
+    token = account.credentials.token;
+  } else if (account.channelType === "messenger") {
+    objectId = account.externalId;
+    token = account.credentials.pageToken;
+  } else {
+    return { providerDisconnected: false };
+  }
+
+  if (!objectId || !token) {
+    return {
+      providerDisconnected: false,
+      warning: `The ${account.channelType} connection was removed locally, but it did not contain the credentials needed to unsubscribe it from Meta.`,
+    };
+  }
+
+  try {
+    const res = await fetch(`${GRAPH()}/${objectId}/subscribed_apps`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok || !json.success) {
+      return {
+        providerDisconnected: false,
+        warning: `The ${account.channelType} connection was removed locally, but Meta could not unsubscribe it: ${json.error?.message ?? `HTTP ${res.status}`}`,
+      };
+    }
+    return { providerDisconnected: true };
+  } catch (error) {
+    return {
+      providerDisconnected: false,
+      warning: `The ${account.channelType} connection was removed locally, but Meta could not be reached: ${error instanceof Error ? error.message : "unknown error"}`,
+    };
+  }
+}
+
 /** Step 1: code → business access token. */
 async function exchangeCode(code: string, redirectUri?: string) {
   const url = new URL(`${GRAPH()}/oauth/access_token`);

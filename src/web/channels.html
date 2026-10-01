@@ -331,7 +331,7 @@
           ${a.fields.map(f => fieldHtml(f, `data-cred-${a.id}`, f.value, f.configured)).join('')}
         </div>
         <div class="row" style="justify-content:flex-end; gap:8px">
-          <button class="danger" data-del="${a.id}">Remove</button>
+          <button class="danger" data-del="${a.id}">${['messenger', 'whatsapp'].includes(a.channelType) ? 'Disconnect' : 'Remove'}</button>
           <button data-save="${a.id}">Save</button>
         </div>
       </div>
@@ -361,11 +361,18 @@
     }
 
     async function removeAccount(id) {
-      if (!confirm('Remove this channel and its conversations?')) return;
-      await api(`/api/channels/${id}`, { method: 'DELETE' });
-      await loadChannels();
-      renderMethodBody();
-      toast('Channel removed');
+      const account = channels.accounts.find(a => a.id === id);
+      const disconnectsMeta = ['messenger', 'whatsapp'].includes(account?.channelType);
+      const verb = disconnectsMeta ? 'Disconnect' : 'Remove';
+      if (!confirm(`${verb} ${account?.displayName || 'this channel'} and remove its conversations?`)) return;
+      try {
+        const result = await api(`/api/channels/${id}`, { method: 'DELETE' });
+        openChannels.delete(id);
+        await loadChannels();
+        renderMethodBody();
+        if (result.warning) alert(result.warning);
+        toast(disconnectsMeta ? 'Channel disconnected' : 'Channel removed');
+      } catch (e) { alert(`${verb} failed: ${e.message}`); }
     }
 
     $('#expandAll').onclick = () => {
@@ -537,8 +544,19 @@
       return `<div style="margin-bottom:10px">${list.map(a => `
         <div class="row spread" style="padding:6px 0">
           <div>${esc(a.displayName)} <span class="summary-id">${esc(a.externalId)}</span></div>
-          <span class="badge ${a.status}">${a.status}</span>
+          <div class="row" style="gap:8px">
+            <span class="badge ${a.status}">${a.status}</span>
+            ${['messenger', 'whatsapp'].includes(a.channelType)
+              ? `<button class="danger" data-connect-disconnect="${a.id}">Disconnect</button>`
+              : ''}
+          </div>
         </div>`).join('')}</div>`;
+    }
+
+    function bindConnectDisconnectButtons(body) {
+      body.querySelectorAll('[data-connect-disconnect]').forEach(button => {
+        button.onclick = () => removeAccount(button.dataset.connectDisconnect);
+      });
     }
 
     function renderWhatsAppBody(body) {
@@ -553,6 +571,7 @@
       <div class="sub">A Meta popup asks the client to pick or create a WhatsApp Business Account and phone number.</div>
       <button id="waConnect">Connect with Meta</button>
     </div>`;
+      bindConnectDisconnectButtons(body);
       $('#waConnect').onclick = () => {
         if (typeof FB === 'undefined') { setStatus('Meta SDK is still loading — try again in a moment.', 'err'); return; }
         whatsapp.signup = null;
@@ -596,6 +615,7 @@
         <div class="sub">You will be sent to Facebook to choose which Pages to share${isIg ? ' — pick the Page linked to your Instagram professional account' : ''}, then returned here to pick one.</div>
         <button id="fbConnect">Connect with Facebook</button>
       </div>`;
+        bindConnectDisconnectButtons(body);
         $('#fbConnect').onclick = go;
         return;
       }
@@ -620,6 +640,7 @@
       <button class="ghost small" id="fbRestart">Log in again</button>
     </div>
     ${rows}`;
+      bindConnectDisconnectButtons(body);
       $('#fbRestart').onclick = go;
       $$('[data-fbpage]').forEach(b => b.onclick = async () => {
         b.disabled = true;

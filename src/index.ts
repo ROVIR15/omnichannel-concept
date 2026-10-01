@@ -5,7 +5,8 @@ import { ingest, inbox, reply, startConversation } from "./core";
 import { signingSecrets } from "./connectors/meta";
 import { connectorFor } from "./registry";
 import {
-  completeFacebookLogin, completeWhatsAppSignup, connectFacebookPage, facebookConfigured, facebookLoginUrl, facebookPages,
+  completeFacebookLogin, completeWhatsAppSignup, connectFacebookPage, disconnectMetaAccount,
+  facebookConfigured, facebookLoginUrl, facebookPages,
   type FacebookChannel,
 } from "./oauth";
 import { seedIfEmpty } from "./seed";
@@ -393,8 +394,14 @@ const server = Bun.serve({
 
     const chanMatch = path.match(/^\/api\/channels\/([^/]+)$/);
     if (chanMatch && method === "DELETE") {
-      deleteAccount(chanMatch[1]!);
-      return json({ ok: true });
+      const account = getAccount(chanMatch[1]!);
+      if (!account) return json({ error: "channel account not found" }, 404);
+
+      const disconnected = account.channelType === "messenger" || account.channelType === "whatsapp"
+        ? await disconnectMetaAccount(account)
+        : { providerDisconnected: false };
+      deleteAccount(account.id);
+      return json({ ok: true, ...disconnected });
     }
 
     // --- WhatsApp Embedded Signup -----------------------------------------
