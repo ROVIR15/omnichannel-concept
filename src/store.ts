@@ -282,3 +282,22 @@ export function consumeGmailOAuthState(state: string): string | null {
   q("DELETE FROM gmail_oauth_states WHERE state = ?").run(state);
   return row && row.expires_at >= Date.now() ? row.org_id : null;
 }
+
+// ---------- Outlook OAuth state -----------------------------------------
+
+export function createOutlookOAuthState(orgId: string): string {
+  const state = `${uid()}${uid()}`.replaceAll("-", "");
+  const expiresAt = Date.now() + 10 * 60_000;
+  q("DELETE FROM outlook_oauth_states WHERE expires_at < ?").run(Date.now());
+  q("INSERT INTO outlook_oauth_states (state, org_id, expires_at) VALUES (?, ?, ?)")
+    .run(state, orgId, expiresAt);
+  return state;
+}
+
+export function consumeOutlookOAuthState(state: string): string | null {
+  const row = q<{ org_id: string; expires_at: number }>(
+    "SELECT org_id, expires_at FROM outlook_oauth_states WHERE state = ?",
+  ).get(state);
+  q("DELETE FROM outlook_oauth_states WHERE state = ?").run(state);
+  return row && row.expires_at >= Date.now() ? row.org_id : null;
+}

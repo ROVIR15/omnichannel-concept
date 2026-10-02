@@ -96,8 +96,8 @@ export async function reply(conversationId: string, text: string, attachments: A
   if (!check.ok) return { ok: false, error: check.reason };
 
   const { conv, account } = check;
-  if (attachments.length && !(account.channelType === "email" && account.credentials.provider === "gmail")) {
-    return { ok: false, error: "attachments are currently supported only for Gmail" };
+  if (attachments.length && !(account.channelType === "email" && ["gmail", "outlook"].includes(account.credentials.provider))) {
+    return { ok: false, error: "attachments are currently supported only for Gmail and Outlook" };
   }
   const identity = identityFor(conv.contact_id, conv.channel_type);
   if (!identity) return { ok: false, error: "no channel identity for contact" };
@@ -123,6 +123,7 @@ export async function reply(conversationId: string, text: string, attachments: A
       ? ((previous || conv.thread_hint) && !/^re:/i.test(conv.subject) ? `Re: ${conv.subject}` : conv.subject)
       : undefined,
     threadHint: conv.thread_hint ?? undefined,
+    replyToMessageId: previous?.external_message_id ?? undefined,
     inReplyTo: previous?.rfc_message_id ?? undefined,
     references: references || undefined,
     attachments,

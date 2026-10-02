@@ -17,6 +17,9 @@ export const APP_SETTING_FIELDS: CredentialField[] = [
   { key: "google_oauth_client_id", label: "Google OAuth Client ID", secret: false, help: "Google Cloud → APIs & Services → Credentials" },
   { key: "google_oauth_client_secret", label: "Google OAuth Client Secret", secret: true, help: "Stored server-side and never returned to the browser." },
   { key: "google_oauth_redirect_uri", label: "Google OAuth Redirect URI", secret: false, help: "Must exactly match Google Cloud, e.g. https://your-host/api/integrations/gmail/callback" },
+  { key: "microsoft_oauth_client_id", label: "Microsoft Application (client) ID", secret: false, help: "Microsoft Entra admin center → App registrations → Overview" },
+  { key: "microsoft_oauth_client_secret", label: "Microsoft Client Secret", secret: true, help: "App registrations → Certificates & secrets. Store the secret value, not its ID." },
+  { key: "microsoft_oauth_redirect_uri", label: "Microsoft OAuth Redirect URI", secret: false, help: "Must exactly match the Web redirect URI, e.g. http://localhost:12301/api/integrations/outlook/callback" },
 ];
 
 const ENV_FALLBACK: Record<string, string> = {
@@ -30,6 +33,9 @@ const ENV_FALLBACK: Record<string, string> = {
   google_oauth_client_id: "GOOGLE_OAUTH_CLIENT_ID",
   google_oauth_client_secret: "GOOGLE_OAUTH_CLIENT_SECRET",
   google_oauth_redirect_uri: "GOOGLE_OAUTH_REDIRECT_URI",
+  microsoft_oauth_client_id: "MICROSOFT_OAUTH_CLIENT_ID",
+  microsoft_oauth_client_secret: "MICROSOFT_OAUTH_CLIENT_SECRET",
+  microsoft_oauth_redirect_uri: "MICROSOFT_OAUTH_REDIRECT_URI",
 };
 
 export function appSetting(key: string): string {

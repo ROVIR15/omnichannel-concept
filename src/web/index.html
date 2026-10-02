@@ -59,6 +59,8 @@ const GROUPS = [
     match: k => k.startsWith('meta_') || k.startsWith('instagram_') },
   { id:'google', label:'Google', hint:'Gmail OAuth for the email channel',
     match: k => k.startsWith('google_') },
+  { id:'microsoft', label:'Microsoft', hint:'Outlook OAuth through Microsoft Graph',
+    match: k => k.startsWith('microsoft_') },
 ];
 
 let fields = [];

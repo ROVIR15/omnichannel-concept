@@ -109,6 +109,8 @@ const CONNECT_METHODS = {
   email: [
     { id:'gmail', title:'Connect Gmail', ready:true,
       hint:'Google OAuth, read and send only. One mailbox per organisation.' },
+    { id:'outlook', title:'Connect Outlook', ready:true,
+      hint:'Microsoft OAuth for reading and sending Outlook or Microsoft 365 mail.' },
     { id:'manual', title:'Inbound webhook', ready:true,
       hint:'Point your mail provider at this app’s email webhook and store the shared secret.' },
   ],
@@ -116,6 +118,7 @@ const CONNECT_METHODS = {
 
 let channels = { accounts: [], catalogue: [] };
 let gmail = { configured:false, connected:false };
+let outlook = { configured:false, connected:false };
 // Facebook: `session` points at Page tokens held on the server after the
 // OAuth callback; the browser only ever sees ids and names.
 let facebook = { configured:false, session:'', pages:null };
@@ -246,6 +249,7 @@ function renderMethods() {
 function renderMethodBody() {
   const body = $('#methodBody');
   if (pickedMethod === 'gmail') return renderGmailBody(body);
+  if (pickedMethod === 'outlook') return renderOutlookBody(body);
   if (pickedMethod === 'meta_login') return renderFacebookBody(body);
   if (!CONNECT_METHODS[pickedChannel]?.find(m => m.id === pickedMethod)?.ready) { body.innerHTML = ''; return; }
   renderManualBody(body);
@@ -322,6 +326,41 @@ function renderGmailBody(body) {
   };
 }
 
+function renderOutlookBody(body) {
+  if (!outlook.configured) {
+    body.innerHTML = `<div class="sub">Save the Microsoft client ID, client secret and redirect URI on
+      <a href="/">Settings</a> before connecting a mailbox.</div>`;
+    return;
+  }
+  body.innerHTML = outlook.connected
+    ? `<div class="row spread">
+         <div>
+           <div style="font-weight:640">${esc(outlook.emailAddress)} <span class="badge connected">connected</span></div>
+           <div class="sub">Reading the latest Inbox messages and sending through Microsoft Graph as this address.</div>
+         </div>
+         <div class="row" style="gap:8px">
+           <button class="ghost" id="outlookReconnect">Reconnect</button>
+           <button class="danger" id="outlookDisconnect">Disconnect</button>
+         </div>
+       </div>`
+    : `<div class="row spread">
+         <div class="sub">You will be sent to Microsoft to approve mailbox access, then returned here.</div>
+         <button id="outlookConnect">Connect Outlook</button>
+       </div>`;
+
+  const go = () => { location.href = `/api/integrations/outlook/connect?org=${encodeURIComponent(orgId)}`; };
+  if ($('#outlookConnect')) $('#outlookConnect').onclick = go;
+  if ($('#outlookReconnect')) $('#outlookReconnect').onclick = go;
+  if ($('#outlookDisconnect')) $('#outlookDisconnect').onclick = async () => {
+    if (!confirm(`Disconnect ${outlook.emailAddress || 'this Outlook account'}? Existing inbox history will be kept.`)) return;
+    try {
+      await jsonPost('/api/integrations/outlook/disconnect', { orgId });
+      await refresh();
+      toast('Outlook disconnected');
+    } catch (e) { setStatus(e.message, 'err'); }
+  };
+}
+
 function renderFacebookBody(body) {
   if (!facebook.configured) {
     body.innerHTML = `<div class="sub">Save the Meta App ID and App Secret on
@@ -393,8 +432,12 @@ async function loadFacebookPages() {
 // ---------- boot ----------
 async function refresh() {
   await loadChannels();
-  try { gmail = await api(`/api/integrations/gmail/status?org=${encodeURIComponent(orgId)}`); }
-  catch { gmail = { configured:false, connected:false }; }
+  const [gmailResult, outlookResult] = await Promise.allSettled([
+    api(`/api/integrations/gmail/status?org=${encodeURIComponent(orgId)}`),
+    api(`/api/integrations/outlook/status?org=${encodeURIComponent(orgId)}`),
+  ]);
+  gmail = gmailResult.status === 'fulfilled' ? gmailResult.value : { configured:false, connected:false };
+  outlook = outlookResult.status === 'fulfilled' ? outlookResult.value : { configured:false, connected:false };
   try { facebook.configured = (await api('/api/integrations/facebook/status')).configured; }
   catch { facebook.configured = false; }
   await loadFacebookPages();
@@ -413,6 +456,12 @@ window.addEventListener('orgchange', () => { facebook = { ...facebook, session:'
 
   // Returning from the Facebook OAuth callback.
   const q = new URLSearchParams(location.search);
+  const outlookResult = q.get('outlook');
+  const outlookError = q.get('outlook_error');
+  if (outlookResult || outlookError) {
+    pickedChannel = q.get('channel') || 'email';
+    pickedMethod = q.get('method') || 'outlook';
+  }
   if (q.has('fb') || q.has('fb_error')) {
     pickedChannel = q.get('channel') || 'messenger';
     pickedMethod = 'meta_login';
@@ -421,6 +470,9 @@ window.addEventListener('orgchange', () => { facebook = { ...facebook, session:'
   }
   await refresh();
   if (q.has('fb_error')) setStatus(q.get('fb_error'), 'err');
+  if (outlookError) setStatus('Outlook connection failed: ' + outlookError, 'err');
+  else if (outlookResult === 'connected') setStatus('Outlook connected.', 'ok');
+  if (outlookResult || outlookError) history.replaceState(null, '', '/channels');
 })();
 </script>
 </body>
