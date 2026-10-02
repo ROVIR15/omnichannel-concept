@@ -92,6 +92,8 @@ export interface OutboundMessage {
   body: string;
   subject?: string;
   threadHint?: string;
+  /** Provider message id to reply to when the platform has an explicit reply action. */
+  replyToMessageId?: string;
   inReplyTo?: string;
   references?: string;
   attachments?: Attachment[];

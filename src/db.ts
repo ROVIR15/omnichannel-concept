@@ -96,9 +96,15 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at           INTEGER NOT NULL
 );
 
--- Short-lived, single-use Gmail OAuth state values. Keeping these server-side
+-- Short-lived, single-use OAuth state values. Keeping these server-side
 -- means the callback never has to trust organisation data from the browser.
 CREATE TABLE IF NOT EXISTS gmail_oauth_states (
+  state       TEXT PRIMARY KEY,
+  org_id      TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  expires_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS outlook_oauth_states (
   state       TEXT PRIMARY KEY,
   org_id      TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
   expires_at  INTEGER NOT NULL
