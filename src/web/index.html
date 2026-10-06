@@ -45,6 +45,12 @@
         LINE → <code id="whLine"></code><br>
         Email → <code id="whEmail"></code>
       </div>
+      <div style="margin-top:12px">
+        Twilio — set in the TwiML App and on each number (calls are not handled yet):<br>
+        Voice → <code id="whTwVoice"></code><br>
+        Call status → <code id="whTwStatus"></code><br>
+        Recording → <code id="whTwRec"></code>
+      </div>
     </div>
   </section>
 </main>
@@ -59,6 +65,8 @@ const GROUPS = [
     match: k => k.startsWith('meta_') || k.startsWith('instagram_') },
   { id:'google', label:'Google', hint:'Gmail OAuth for the email channel',
     match: k => k.startsWith('google_') },
+  { id:'twilio', label:'Twilio', hint:'Voice calls — one subaccount per client organisation',
+    match: k => k.startsWith('twilio_') },
   { id:'microsoft', label:'Microsoft', hint:'Outlook OAuth through Microsoft Graph',
     match: k => k.startsWith('microsoft_') },
 ];
@@ -107,6 +115,9 @@ $('#saveSettings').onclick = async () => {
 $('#whMeta').textContent  = location.origin + '/webhooks/meta';
 $('#whLine').textContent  = location.origin + '/webhooks/line';
 $('#whEmail').textContent = location.origin + '/webhooks/email?secret=YOUR_SECRET';
+$('#whTwVoice').textContent  = location.origin + '/webhooks/twilio/voice';
+$('#whTwStatus').textContent = location.origin + '/webhooks/twilio/status';
+$('#whTwRec').textContent    = location.origin + '/webhooks/twilio/recording';
 
 (async () => {
   await mountShell({ active: '/', manageOrgs: true });
