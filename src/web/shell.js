@@ -48,7 +48,7 @@ function fieldHtml(f, attr, value = '', configured = false) {
     <div class="field">
       <label>${esc(f.label)} ${configured ? '<span class="badge active">set</span>' : ''}</label>
       <input ${attr}="${esc(f.key)}" type="${f.secret ? 'password' : 'text'}"
-             value="${esc(value)}" placeholder="${f.secret && configured ? '•••••••• (unchanged)' : ''}" />
+             value="${esc(value)}" placeholder="${f.secret && configured ? '•••••••• (unchanged)' : esc(f.placeholder || '')}" />
       ${f.help ? `<div class="help">${esc(f.help)}</div>` : ''}
     </div>`;
 }

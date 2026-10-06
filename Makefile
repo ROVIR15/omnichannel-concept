@@ -55,8 +55,8 @@ demo: bg sim ## Start server, send sample traffic, open the inbox
 	@echo; echo "inbox → $(BASE)/"
 	@command -v open > /dev/null && open $(BASE)/ || true
 
-check: ## Run the capability/session-window guard checks
-	$(BUN) scripts/check-guards.ts
+check: ## Run the capability/session-window guard checks (in-memory DB)
+	DB_PATH=:memory: $(BUN) scripts/check-guards.ts
 
 typecheck: ## Type-check without emitting
 	$(BUN) x tsc --noEmit

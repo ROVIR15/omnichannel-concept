@@ -110,6 +110,35 @@ CREATE TABLE IF NOT EXISTS outlook_oauth_states (
   expires_at  INTEGER NOT NULL
 );
 
+-- Rate limiting (src/limits). One row per accepted event; rows older than
+-- the limiter's window are pruned as it runs. Shared by every process on this
+-- database, so the limits hold across restarts and instances.
+CREATE TABLE IF NOT EXISTS rate_limit_events (
+  limiter  TEXT NOT NULL,
+  key      TEXT NOT NULL,
+  at       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limit_events ON rate_limit_events(limiter, key, at);
+
+CREATE TABLE IF NOT EXISTS rate_limit_counters (
+  limiter   TEXT NOT NULL,
+  key       TEXT NOT NULL,
+  rejected  INTEGER NOT NULL DEFAULT 0,
+  since     INTEGER NOT NULL,
+  PRIMARY KEY (limiter, key)
+);
+
+-- Daily limits (src/limits/daily.ts): one row per limiter, key and calendar
+-- day (server timezone). Old days are kept as a usage history.
+CREATE TABLE IF NOT EXISTS rate_limit_daily (
+  limiter   TEXT NOT NULL,
+  key       TEXT NOT NULL,
+  day       TEXT NOT NULL,
+  used      INTEGER NOT NULL DEFAULT 0,
+  rejected  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (limiter, key, day)
+);
+
 -- Idempotency: platforms retry webhooks, sometimes for hours.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external
   ON messages(external_message_id) WHERE external_message_id IS NOT NULL;

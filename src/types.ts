@@ -42,6 +42,8 @@ export interface CredentialField {
   help?: string;
   /** Provider-level (your Meta app) rather than per-organisation. */
   appLevel?: boolean;
+  /** Shown in an empty input — the value used when nothing is set. */
+  placeholder?: string;
 }
 
 export interface ChannelAccount {

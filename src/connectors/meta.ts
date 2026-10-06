@@ -7,8 +7,9 @@ import type {
   Capabilities, ChannelAccount, ChannelConnector, ChannelType, CredentialField,
   MessageType, NormalizedMessage, OutboundMessage, SendResult, WebhookRequest,
 } from "../types";
+import { whatsappConnector } from "../whatsapp/connector";
 
-const GRAPH = () => `https://graph.facebook.com/${appSetting("meta_graph_version") || "v21.0"}`;
+export const GRAPH = () => `https://graph.facebook.com/${appSetting("meta_graph_version") || "v21.0"}`;
 
 /** Meta signs the raw body with an app secret. Compare against the raw bytes —
  *  re-serializing the JSON changes the hash and breaks this.
@@ -51,7 +52,7 @@ function verifySignature(rawBody: string, header: string | null): boolean {
   return matchingSecret(rawBody, header) !== null;
 }
 
-function baseCaps(over: Partial<Capabilities>): Capabilities {
+export function baseCaps(over: Partial<Capabilities>): Capabilities {
   return {
     supportsRichText: false,
     supportsTemplates: false,
@@ -64,7 +65,7 @@ function baseCaps(over: Partial<Capabilities>): Capabilities {
   };
 }
 
-function metaAttachmentType(t: string): MessageType {
+export function metaAttachmentType(t: string): MessageType {
   if (t === "image" || t === "audio" || t === "video") return t;
   if (t === "file" || t === "document") return "file";
   if (t === "location") return "location";
@@ -248,71 +249,5 @@ export const instagramConnector: ChannelConnector = {
       { ...account, externalId: sendId },
       out,
     );
-  },
-};
-
-export const whatsappConnector: ChannelConnector = {
-  channelType: () => "whatsapp",
-  credentialFields: () => [
-    { key: "token", label: "WhatsApp Access Token", secret: true, help: "System user token, or the temporary token from API Setup." },
-  ],
-  capabilities: () =>
-    baseCaps({
-      supportsTemplates: true, // the only way to reopen a closed 24h window
-      maxTextLength: 4096,
-      supportsTypingIndicator: false,
-    }),
-
-  handleVerification: messengerConnector.handleVerification,
-  verifyWebhook: messengerConnector.verifyWebhook,
-
-  parseInbound(rawBody) {
-    const body = JSON.parse(rawBody);
-    const out: NormalizedMessage[] = [];
-    for (const entry of body.entry ?? []) {
-      for (const change of entry.changes ?? []) {
-        const value = change.value ?? {};
-        const phoneNumberId = value.metadata?.phone_number_id;
-        const profileName = value.contacts?.[0]?.profile?.name;
-        for (const m of value.messages ?? []) {
-          const type: MessageType =
-            m.type === "text" ? "text" : metaAttachmentType(m.type);
-          out.push({
-            channelType: "whatsapp",
-            accountExternalId: String(phoneNumberId),
-            externalUserId: String(m.from),
-            externalMessageId: String(m.id),
-            direction: "inbound",
-            type,
-            body: m.text?.body ?? m[m.type]?.caption ?? "",
-            attachments: type === "text" ? [] : [{ type, name: m[m.type]?.id }],
-            timestamp: Number(m.timestamp) * 1000 || Date.now(),
-            senderName: profileName,
-            rawPayload: m,
-          });
-        }
-      }
-    }
-    return out;
-  },
-
-  async send(account, out): Promise<SendResult> {
-    const res = await fetch(`${GRAPH()}/${account.externalId}/messages`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${account.credentials.token}`,
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: out.to,
-        type: "text",
-        text: { body: out.body },
-      }),
-    });
-    const json: any = await res.json().catch(() => ({}));
-    return res.ok
-      ? { ok: true, externalMessageId: json.messages?.[0]?.id }
-      : { ok: false, error: json.error?.message ?? `HTTP ${res.status}` };
   },
 };
