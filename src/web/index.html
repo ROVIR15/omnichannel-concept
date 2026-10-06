@@ -67,6 +67,8 @@ const GROUPS = [
     match: k => k.startsWith('google_') },
   { id:'twilio', label:'Twilio', hint:'Voice calls — one subaccount per client organisation',
     match: k => k.startsWith('twilio_') },
+  { id:'microsoft', label:'Microsoft', hint:'Outlook OAuth through Microsoft Graph',
+    match: k => k.startsWith('microsoft_') },
 ];
 
 let fields = [];

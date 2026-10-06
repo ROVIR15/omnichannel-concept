@@ -19,8 +19,16 @@ import {
   syncGmailInbox,
 } from "./integrations/gmail";
 import {
+  completeOutlookOAuth,
+  disconnectOutlook,
+  downloadOutlookAttachment,
+  outlookConnectionStatus,
+  outlookConnectUrl,
+  syncOutlookInbox,
+} from "./integrations/outlook";
+import {
   accountByExternal, createOrg, deleteAccount, deleteOrg, getAccount, listAccounts,
-  listOrgs, renameOrg, upsertAccount, consumeGmailOAuthState,
+  listOrgs, renameOrg, upsertAccount, consumeGmailOAuthState, consumeOutlookOAuthState,
 } from "./store";
 import type { Attachment, ChannelAccount, ChannelType, WebhookRequest } from "./types";
 
@@ -62,6 +70,7 @@ function maskAccount(a: ChannelAccount) {
     externalId: a.externalId,
     displayName: a.displayName,
     status: a.status,
+    provider: a.credentials.provider ?? null,
     capabilities: connectorFor(a.channelType).capabilities(),
     fields: fields.map((f) => ({
       ...f,
@@ -342,6 +351,129 @@ const server = Bun.serve({
       if (!status.connected || !status.accountId) return json({ error: "Gmail is not connected" }, 400);
       const result = await startConversation({
         accountId: status.accountId,
+        to: b.to,
+        subject: b.subject,
+        text: b.bodyText ?? "",
+        attachments: b.attachments,
+      });
+      return json(result, result.ok ? 201 : 400);
+    }
+
+    // --- Outlook integration --------------------------------------------
+    if (path === "/api/integrations/outlook/connect" && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      try {
+        return Response.redirect(outlookConnectUrl(orgId), 302);
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "could not start Outlook OAuth" }, 400);
+      }
+    }
+
+    if (path === "/api/integrations/outlook/callback" && method === "GET") {
+      const state = url.searchParams.get("state") ?? "";
+      const orgId = state ? consumeOutlookOAuthState(state) : null;
+      if (!orgId) return json({ error: "invalid or expired OAuth state" }, 400);
+      const destination = new URL("/inbox", url.origin);
+      destination.searchParams.set("org", orgId);
+      const oauthError = url.searchParams.get("error");
+      if (oauthError) {
+        destination.searchParams.set(
+          "outlook_error",
+          url.searchParams.get("error_description") || oauthError,
+        );
+        return Response.redirect(destination, 302);
+      }
+      const code = url.searchParams.get("code");
+      if (!code) return json({ error: "Microsoft did not return an authorization code" }, 400);
+      try {
+        await completeOutlookOAuth(orgId, code);
+        destination.searchParams.set("outlook", "connected");
+      } catch (error: unknown) {
+        destination.searchParams.set(
+          "outlook_error",
+          error instanceof Error ? error.message : "Outlook connection failed",
+        );
+      }
+      return Response.redirect(destination, 302);
+    }
+
+    if (path === "/api/integrations/outlook/status" && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      return json(outlookConnectionStatus(orgId));
+    }
+
+    if (path === "/api/integrations/outlook/messages" && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      try {
+        return json(await syncOutlookInbox(orgId));
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "Outlook inbox sync failed" }, 502);
+      }
+    }
+
+    const outlookAttachmentMatch = path.match(/^\/api\/integrations\/outlook\/attachments\/([^/]+)\/([^/]+)$/);
+    if (outlookAttachmentMatch && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      try {
+        const attachment = await downloadOutlookAttachment(
+          orgId,
+          decodeURIComponent(outlookAttachmentMatch[1]!),
+          decodeURIComponent(outlookAttachmentMatch[2]!),
+        );
+        const previewable = new Set([
+          "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp",
+          "application/pdf",
+        ]).has(attachment.mimeType.toLowerCase());
+        const disposition = url.searchParams.get("inline") === "1" && previewable
+          ? "inline"
+          : "attachment";
+        return new Response(attachment.bytes, {
+          headers: {
+            "content-type": attachment.mimeType,
+            "content-disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
+            "cache-control": "private, no-store",
+            "x-content-type-options": "nosniff",
+          },
+        });
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "attachment download failed" }, 404);
+      }
+    }
+
+    if (path === "/api/integrations/outlook/disconnect" && method === "POST") {
+      const b = await body<{ orgId?: string }>(req);
+      if (!b?.orgId) return json({ error: "orgId is required" }, 400);
+      try {
+        disconnectOutlook(b.orgId);
+        return json({ ok: true });
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "Outlook disconnect failed" }, 400);
+      }
+    }
+
+    if (path === "/api/integrations/email/send" && method === "POST") {
+      const b = await body<{
+        orgId?: string; accountId?: string; to?: string; subject?: string;
+        bodyText?: string; attachments?: Attachment[];
+      }>(req);
+      if (!b?.orgId || !b.accountId || !b.to?.trim() || !b.subject?.trim()
+          || (!b.bodyText?.trim() && !b.attachments?.length)) {
+        return json({ error: "orgId, accountId, to, subject, and a message or attachment are required" }, 400);
+      }
+      const account = getAccount(b.accountId);
+      if (!account || account.orgId !== b.orgId || account.channelType !== "email") {
+        return json({ error: "email account not found for this organisation" }, 404);
+      }
+      if (!["gmail", "outlook"].includes(account.credentials.provider)
+          || !(account.credentials.refreshToken || account.credentials.accessToken)) {
+        return json({ error: "selected email account is not connected" }, 400);
+      }
+      const result = await startConversation({
+        accountId: account.id,
         to: b.to,
         subject: b.subject,
         text: b.bodyText ?? "",

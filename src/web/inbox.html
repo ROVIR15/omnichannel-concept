@@ -60,7 +60,8 @@
   #empty { margin:auto; color:var(--muted); }
   #warn { padding:7px 14px; font-size:12px; color:var(--warn); background:#b4530912; }
   #convInfo { padding:10px 16px; border-bottom:1px solid var(--line); }
-  #gmailState { font-size:12px; color:var(--muted); }
+  #mailState { font-size:12px; color:var(--muted); }
+  #mailboxSelect { max-width:260px; }
   dialog { border:1px solid var(--line); border-radius:12px; padding:20px; min-width:340px; background:Canvas; color:CanvasText; }
   dialog::backdrop { background:#0006; }
   dialog h3 { margin:0 0 14px; font-size:14px; }
@@ -116,27 +117,31 @@
   </div>
 </dialog>
 
-<dialog id="gmailDlg">
+<dialog id="emailDlg">
   <h3>New email</h3>
   <div class="field">
+    <label>From</label>
+    <select id="emailFrom"></select>
+  </div>
+  <div class="field">
     <label>To</label>
-    <input id="gmailTo" type="email" placeholder="customer@example.com" />
+    <input id="emailTo" type="email" placeholder="customer@example.com" />
   </div>
   <div class="field">
     <label>Subject</label>
-    <input id="gmailSubject" placeholder="Gmail Integration Test" />
+    <input id="emailSubject" placeholder="Email subject" />
   </div>
   <div class="field">
     <label>Message</label>
-    <textarea id="gmailBody" rows="8" placeholder="Hello from Omnichannel"></textarea>
+    <textarea id="emailBody" rows="8" placeholder="Hello from Omnichannel"></textarea>
   </div>
   <div class="field">
     <label>Attachments <span style="opacity:.6">(10 MB each, 20 MB total)</span></label>
-    <input id="gmailFiles" type="file" multiple />
+    <input id="emailFiles" type="file" multiple />
   </div>
   <div class="row" style="justify-content:flex-end; gap:8px; margin-top:16px">
-    <button class="ghost" id="gmailCancel">Cancel</button>
-    <button id="gmailSend">Send</button>
+    <button class="ghost" id="emailCancel">Cancel</button>
+    <button id="emailSend">Send</button>
   </div>
 </dialog>
 
@@ -145,12 +150,15 @@
 // Connecting a mailbox lives on Channels; the Inbox only reads and replies.
 const HEADER_ACTIONS = `
   <button id="newConv">New conversation</button>
-  <button id="gmailCompose" hidden>Compose email</button>
-  <button class="ghost" id="gmailSync" hidden>Sync Gmail</button>
-  <span id="gmailState"></span>`;
+  <select id="mailboxSelect" hidden aria-label="Selected email mailbox"></select>
+  <button id="emailCompose" hidden>Compose email</button>
+  <button class="ghost" id="emailSync" hidden>Sync inbox</button>
+  <span id="mailState"></span>`;
 
 const query = new URLSearchParams(location.search);
-let accounts = [], convs = [], active = null, gmail = { configured:false, connected:false };
+let accounts = [], convs = [], active = null, mailboxes = [];
+let gmail = { configured:false, connected:false };
+let outlook = { configured:false, connected:false };
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 20 * 1024 * 1024;
@@ -186,11 +194,18 @@ function formatBytes(size) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function providerForAccount(accountId) {
+  return accounts.find(account => account.id === accountId)?.provider
+    || (gmail.accountId === accountId ? 'gmail' : '')
+    || (outlook.accountId === accountId ? 'outlook' : '');
+}
+
 function attachmentHtml(conversation, message, attachment) {
   const detail = attachment.size ? ` · ${formatBytes(attachment.size)}` : '';
   const label = `📎 ${attachment.name || 'attachment'}${detail}`;
-  if (conversation.channel === 'email' && message.externalMessageId && attachment.id) {
-    const base = `/api/integrations/gmail/attachments/${encodeURIComponent(message.externalMessageId)}/${encodeURIComponent(attachment.id)}?org=${encodeURIComponent(orgId)}&name=${encodeURIComponent(attachment.name || '')}`;
+  const provider = providerForAccount(conversation.accountId);
+  if (conversation.channel === 'email' && ['gmail','outlook'].includes(provider) && message.externalMessageId && attachment.id) {
+    const base = `/api/integrations/${provider}/attachments/${encodeURIComponent(message.externalMessageId)}/${encodeURIComponent(attachment.id)}?org=${encodeURIComponent(orgId)}&name=${encodeURIComponent(attachment.name || '')}`;
     const viewHref = base + '&inline=1';
     const previewable = ['image/png','image/jpeg','image/gif','image/webp','image/avif','image/bmp'].includes((attachment.mimeType || '').toLowerCase());
     const canView = previewable || (attachment.mimeType || '').toLowerCase() === 'application/pdf';
@@ -236,10 +251,12 @@ function renderMessage(conversation, message) {
     </div>`;
   }
 
-  const sender = message.sender || (message.direction === 'outbound' ? gmail.emailAddress : conversation.contact) || 'Unknown sender';
+  const account = accounts.find(item => item.id === conversation.accountId);
+  const sender = message.sender || (message.direction === 'outbound' ? account?.externalId : conversation.contact) || 'Unknown sender';
   const recipient = message.recipient || '';
   const initial = sender.trim().charAt(0).toUpperCase() || '✉';
-  const technicalTitle = message.externalMessageId ? `Gmail message ID: ${message.externalMessageId}` : '';
+  const provider = providerForAccount(conversation.accountId);
+  const technicalTitle = message.externalMessageId ? `${provider || 'email'} message ID: ${message.externalMessageId}` : '';
   return `<article class="msg email ${message.direction} ${message.status === 'failed' ? 'failed' : ''}">
     <div class="email-header">
       <div class="email-avatar">${esc(initial)}</div>
@@ -268,7 +285,7 @@ const PLACEHOLDER = {
 
 window.addEventListener('orgchange', async () => {
   active = null;
-  await loadAccounts(); await loadGmailStatus(); await load();
+  await loadAccounts(); await loadMailStatus(); await load();
 });
 
 async function loadAccounts() {
@@ -283,28 +300,46 @@ async function load() {
   render();
 }
 
-async function loadGmailStatus() {
-  gmail = await api(`/api/integrations/gmail/status?org=${encodeURIComponent(orgId)}`);
-  $('#gmailSync').hidden = !gmail.connected;
-  $('#gmailCompose').hidden = !gmail.connected;
-  $('#gmailState').innerHTML = gmail.connected
-    ? `Gmail: ${esc(gmail.emailAddress)}`
-    : `<a href="/channels">${gmail.configured ? 'Connect Gmail' : 'Set up Google OAuth'}</a>`;
+async function loadMailStatus() {
+  const selected = $('#mailboxSelect').value;
+  const [gmailResult, outlookResult] = await Promise.allSettled([
+    api(`/api/integrations/gmail/status?org=${encodeURIComponent(orgId)}`),
+    api(`/api/integrations/outlook/status?org=${encodeURIComponent(orgId)}`),
+  ]);
+  gmail = gmailResult.status === 'fulfilled' ? gmailResult.value : { configured:false, connected:false };
+  outlook = outlookResult.status === 'fulfilled' ? outlookResult.value : { configured:false, connected:false };
+  mailboxes = [
+    { ...gmail, provider:'gmail', providerLabel:'Gmail' },
+    { ...outlook, provider:'outlook', providerLabel:'Outlook' },
+  ].filter(mailbox => mailbox.connected && mailbox.accountId);
+
+  $('#mailboxSelect').innerHTML = mailboxes.map(mailbox =>
+    `<option value="${esc(mailbox.accountId)}">${mailbox.providerLabel} — ${esc(mailbox.emailAddress)}</option>`).join('');
+  if (selected && mailboxes.some(mailbox => mailbox.accountId === selected)) $('#mailboxSelect').value = selected;
+  const connected = mailboxes.length > 0;
+  $('#mailboxSelect').hidden = !connected;
+  $('#emailSync').hidden = !connected;
+  $('#emailCompose').hidden = !connected;
+  $('#mailState').innerHTML = connected
+    ? `${mailboxes.length} mailbox${mailboxes.length === 1 ? '' : 'es'} connected`
+    : '<a href="/channels">Connect Gmail or Outlook</a>';
 }
 
-async function syncGmail() {
-  const button = $('#gmailSync');
+async function syncSelectedMailbox() {
+  const mailbox = mailboxes.find(item => item.accountId === $('#mailboxSelect').value) || mailboxes[0];
+  if (!mailbox) return;
+  const button = $('#emailSync');
   button.disabled = true;
   button.textContent = 'Syncing…';
   try {
-    const result = await api(`/api/integrations/gmail/messages?org=${encodeURIComponent(orgId)}`);
+    const result = await api(`/api/integrations/${mailbox.provider}/messages?org=${encodeURIComponent(orgId)}`);
     await load();
-    if (result.synced) alert(`Added ${result.synced} Gmail message${result.synced === 1 ? '' : 's'} to the inbox.`);
+    if (result.synced) alert(`Added ${result.synced} ${mailbox.providerLabel} message${result.synced === 1 ? '' : 's'} to the inbox.`);
   } catch (e) {
-    alert('Gmail sync failed: ' + e.message);
+    alert(`${mailbox.providerLabel} sync failed: ${e.message}`);
   } finally {
     button.disabled = false;
-    button.textContent = 'Sync Gmail';
+    button.textContent = 'Sync inbox';
   }
 }
 
@@ -331,7 +366,10 @@ function render() {
     return;
   }
 
-  $('#replyAttach').hidden = c.accountId !== gmail.accountId;
+  const accountProvider = providerForAccount(c.accountId);
+  $('#replyAttach').hidden = c.channel !== 'email'
+    || !['gmail','outlook'].includes(accountProvider)
+    || !mailboxes.some(mailbox => mailbox.accountId === c.accountId);
   if ($('#replyAttach').hidden) {
     $('#replyFiles').value = '';
     $('#replyFileLabel').textContent = 'Attach';
@@ -373,26 +411,34 @@ $('#replyFiles').onchange = e => {
   $('#replyFileLabel').textContent = count ? `${count} file${count === 1 ? '' : 's'}` : 'Attach';
 };
 
-// ---------- Gmail ----------
-$('#gmailCancel').onclick = () => $('#gmailDlg').close();
-$('#gmailSend').onclick = async () => {
-  const button = $('#gmailSend');
+// ---------- email ----------
+function populateFromDropdown() {
+  const selected = $('#emailFrom').value || $('#mailboxSelect').value;
+  $('#emailFrom').innerHTML = mailboxes.map(mailbox =>
+    `<option value="${esc(mailbox.accountId)}">${mailbox.providerLabel} — ${esc(mailbox.emailAddress)}</option>`).join('');
+  if (selected && mailboxes.some(mailbox => mailbox.accountId === selected)) $('#emailFrom').value = selected;
+}
+
+$('#emailCancel').onclick = () => $('#emailDlg').close();
+$('#emailSend').onclick = async () => {
+  const button = $('#emailSend');
   button.disabled = true;
   try {
-    const attachments = await filesToAttachments($('#gmailFiles'));
-    const result = await api('/api/integrations/gmail/send', {
+    const attachments = await filesToAttachments($('#emailFiles'));
+    const result = await api('/api/integrations/email/send', {
       method:'POST', headers:{'content-type':'application/json'},
       body: JSON.stringify({
         orgId,
-        to: $('#gmailTo').value,
-        subject: $('#gmailSubject').value,
-        bodyText: $('#gmailBody').value,
+        accountId: $('#emailFrom').value,
+        to: $('#emailTo').value,
+        subject: $('#emailSubject').value,
+        bodyText: $('#emailBody').value,
         attachments,
       }),
     });
     active = result.conversationId;
-    $('#gmailDlg').close();
-    ['#gmailTo','#gmailSubject','#gmailBody','#gmailFiles'].forEach(s => $(s).value = '');
+    $('#emailDlg').close();
+    ['#emailTo','#emailSubject','#emailBody','#emailFiles'].forEach(s => $(s).value = '');
     await load();
   } catch (e) {
     alert('Email send failed: ' + e.message);
@@ -411,8 +457,17 @@ function wireHeaderActions() {
     updateHint();
     $('#dlg').showModal();
   };
-  $('#gmailSync').onclick = syncGmail;
-  $('#gmailCompose').onclick = () => $('#gmailDlg').showModal();
+  $('#emailSync').onclick = syncSelectedMailbox;
+  $('#emailCompose').onclick = () => {
+    populateFromDropdown();
+    $('#emailDlg').showModal();
+  };
+  $('#mailboxSelect').onchange = () => {
+    if ($('#emailDlg').open) {
+      populateFromDropdown();
+      $('#emailFrom').value = $('#mailboxSelect').value;
+    }
+  };
 }
 
 function updateHint() {
@@ -455,9 +510,17 @@ $('#dlgCreate').onclick = async () => {
   wireHeaderActions();
   const fromCallback = query.get('org');
   if (fromCallback) { orgId = fromCallback; localStorage.setItem('orgId', orgId); await loadOrgs(); }
-  await loadAccounts(); await loadGmailStatus();
+  await loadAccounts(); await loadMailStatus();
   if (query.get('gmail_error')) alert('Gmail connection failed: ' + query.get('gmail_error'));
-  if (query.get('gmail') === 'connected') await syncGmail();
+  if (query.get('outlook_error')) alert('Outlook connection failed: ' + query.get('outlook_error'));
+  if (query.get('gmail') === 'connected') {
+    $('#mailboxSelect').value = gmail.accountId || '';
+    await syncSelectedMailbox();
+  }
+  if (query.get('outlook') === 'connected') {
+    $('#mailboxSelect').value = outlook.accountId || '';
+    await syncSelectedMailbox();
+  }
   await load();
   if (location.search) history.replaceState({}, '', '/inbox');
   setInterval(load, 3000);

@@ -91,6 +91,31 @@ plain text, attachments are limited to 10 MB each and 20 MB total, credentials
 are plaintext in the local SQLite file, and there is no app authentication or
 multi-Gmail-account support.
 
+## Outlook connection
+
+Outlook and Microsoft 365 mailboxes can be connected from **Channels** using
+Microsoft OAuth. The Inbox can import the latest 20 messages, download received
+attachments, and send new conversations and replies through Microsoft Graph.
+
+### Microsoft Entra setup
+
+1. Create an app registration and add a **Web** redirect URI. For the default
+   local setup use
+   `http://localhost:12301/api/integrations/outlook/callback`.
+2. Add delegated Microsoft Graph permissions for `User.Read`, `Mail.Read`, and
+   `Mail.Send`, then create a client secret.
+3. In this app's **Settings** page, save the Application (client) ID, client
+   secret, and the exact redirect URI. The integration uses Microsoft's
+   `common` authority for work, school, and personal Microsoft accounts.
+4. Open **Channels**, pick **email** → **Connect Outlook**, and approve access.
+   The same panel provides reconnect and disconnect controls.
+5. Open **Inbox**, select the Outlook address in the mailbox dropdown, and
+   click **Sync inbox**. Use the **From** dropdown when composing to choose
+   between connected Outlook and Gmail addresses.
+
+The values can alternatively come from `MICROSOFT_OAUTH_CLIENT_ID`,
+`MICROSOFT_OAUTH_CLIENT_SECRET`, and `MICROSOFT_OAUTH_REDIRECT_URI`.
+
 **Set `NGROK_DOMAIN` in `.env`** to a free static domain from
 [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains). Without it
 the public URL changes on every restart, and every change means re-pasting the
@@ -137,12 +162,13 @@ src/
     email.ts          provider-neutral inbound webhook + outbound HTTP API
   integrations/
     gmail.ts          OAuth, token refresh, Inbox import, and Gmail API sending
+    outlook.ts        Microsoft OAuth, token refresh, and Graph email sending
   web/
     shell.css         shared tokens, header and controls for every page
     shell.js          shared header, org picker and fetch helpers
     index.html        settings: organisations and provider apps, grouped
     channels.html     per-client channel setup: pick a channel, pick how to connect
-    inbox.html        agent inbox: replies, new conversations, Gmail sync
+    inbox.html        agent inbox: replies, mailbox selection, compose and sync
 ```
 
 ## Two levels of credentials
@@ -175,6 +201,11 @@ the stored one untouched.
 | `POST /api/integrations/gmail/disconnect` | revoke Gmail access and remove locally stored OAuth tokens |
 | `POST /api/integrations/gmail/send` | send a new email through the connected Gmail account |
 | `GET /api/integrations/gmail/attachments/:messageId/:attachmentId` | download an attachment from Gmail |
+| `GET /api/integrations/outlook/connect`, `GET /api/integrations/outlook/callback` | Outlook OAuth flow |
+| `GET /api/integrations/outlook/status`, `GET /api/integrations/outlook/messages` | Outlook connection status and manual inbox sync |
+| `POST /api/integrations/outlook/disconnect` | remove locally stored Outlook OAuth tokens |
+| `GET /api/integrations/outlook/attachments/:messageId/:attachmentId` | download an attachment from Outlook |
+| `POST /api/integrations/email/send` | send from a selected connected Gmail or Outlook account |
 | `GET /api/conversations?org=` | inbox data |
 | `POST /api/conversations` | start an outbound conversation |
 | `POST /api/conversations/:id/reply` | reply, subject to capability guards |

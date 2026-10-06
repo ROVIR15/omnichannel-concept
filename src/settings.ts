@@ -23,6 +23,9 @@ export const APP_SETTING_FIELDS: CredentialField[] = [
   { key: "twilio_api_key_secret", label: "Twilio API Key Secret", secret: true, help: "Shown once when the key is created in Twilio." },
   { key: "twilio_twiml_app_sid", label: "Twilio TwiML App SID", secret: false, help: "Console → Voice → TwiML Apps. Starts with AP. Its Voice URL must point at the voice webhook below." },
   { key: "twilio_outbound_countries", label: "Allowed Outbound Countries", secret: false, help: "Comma-separated ISO codes, e.g. US,CA,ID. Blocks calls to expensive destinations. Blank = no calls allowed yet." },
+  { key: "microsoft_oauth_client_id", label: "Microsoft Application (client) ID", secret: false, help: "Microsoft Entra admin center → App registrations → Overview" },
+  { key: "microsoft_oauth_client_secret", label: "Microsoft Client Secret", secret: true, help: "App registrations → Certificates & secrets. Store the secret value, not its ID." },
+  { key: "microsoft_oauth_redirect_uri", label: "Microsoft OAuth Redirect URI", secret: false, help: "Must exactly match the Web redirect URI, e.g. http://localhost:12301/api/integrations/outlook/callback" },
 ];
 
 const ENV_FALLBACK: Record<string, string> = {
@@ -42,6 +45,9 @@ const ENV_FALLBACK: Record<string, string> = {
   twilio_api_key_secret: "TWILIO_API_KEY_SECRET",
   twilio_twiml_app_sid: "TWILIO_TWIML_APP_SID",
   twilio_outbound_countries: "TWILIO_OUTBOUND_COUNTRIES",
+  microsoft_oauth_client_id: "MICROSOFT_OAUTH_CLIENT_ID",
+  microsoft_oauth_client_secret: "MICROSOFT_OAUTH_CLIENT_SECRET",
+  microsoft_oauth_redirect_uri: "MICROSOFT_OAUTH_REDIRECT_URI",
 };
 
 export function appSetting(key: string): string {

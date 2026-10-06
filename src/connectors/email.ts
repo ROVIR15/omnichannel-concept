@@ -4,6 +4,7 @@
 
 import type { ChannelConnector, NormalizedMessage, SendResult } from "../types";
 import { sendGmail } from "../integrations/gmail";
+import { sendOutlook } from "../integrations/outlook";
 
 export const emailConnector: ChannelConnector = {
   channelType: () => "email",
@@ -67,6 +68,7 @@ export const emailConnector: ChannelConnector = {
 
   async send(account, out): Promise<SendResult> {
     if (account.credentials.provider === "gmail") return sendGmail(account, out);
+    if (account.credentials.provider === "outlook") return sendOutlook(account, out);
 
     const url = account.credentials.apiUrl;
     if (!url) {
