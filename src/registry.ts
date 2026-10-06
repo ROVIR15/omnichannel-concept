@@ -1,5 +1,6 @@
 import type { ChannelConnector, ChannelType } from "./types";
-import { messengerConnector, instagramConnector, whatsappConnector } from "./connectors/meta";
+import { messengerConnector, instagramConnector } from "./connectors/meta";
+import { whatsappConnector } from "./whatsapp";
 import { lineConnector } from "./connectors/line";
 import { emailConnector } from "./connectors/email";
 

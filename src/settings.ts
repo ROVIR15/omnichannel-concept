@@ -4,6 +4,7 @@
 
 import { allSettings, getSetting, setSetting } from "./db";
 import type { CredentialField } from "./types";
+import { WHATSAPP_LIMIT_DEFAULTS as WA } from "./whatsapp/defaults";
 
 export const APP_SETTING_FIELDS: CredentialField[] = [
   { key: "meta_app_id", label: "Meta App ID", secret: false, help: "App Dashboard → Settings → Basic" },
@@ -20,6 +21,12 @@ export const APP_SETTING_FIELDS: CredentialField[] = [
   { key: "microsoft_oauth_client_id", label: "Microsoft Application (client) ID", secret: false, help: "Microsoft Entra admin center → App registrations → Overview" },
   { key: "microsoft_oauth_client_secret", label: "Microsoft Client Secret", secret: true, help: "App registrations → Certificates & secrets. Store the secret value, not its ID." },
   { key: "microsoft_oauth_redirect_uri", label: "Microsoft OAuth Redirect URI", secret: false, help: "Must exactly match the Web redirect URI, e.g. http://localhost:12301/api/integrations/outlook/callback" },
+  // WhatsApp totals: "<count>/<seconds>", 0 = unlimited, blank = default.
+  // Daily: a plain count per calendar day, blank or 0 = unlimited.
+  { key: "whatsapp_inbound_limit", label: "Inbound messages", secret: false, placeholder: WA.whatsapp_inbound_limit, help: `Total WhatsApp messages accepted from customers, across all numbers. Extra messages are dropped. Default ${WA.whatsapp_inbound_limit}.` },
+  { key: "whatsapp_inbound_daily_limit", label: "Inbound messages per day", secret: false, placeholder: "unlimited", help: "Total WhatsApp messages accepted per calendar day, resetting at midnight server time. Applies on top of the limit above." },
+  { key: "whatsapp_outbound_limit", label: "Outbound messages", secret: false, placeholder: WA.whatsapp_outbound_limit, help: `Total WhatsApp messages sent, across all numbers. Extra sends fail with a retry time. Default ${WA.whatsapp_outbound_limit}.` },
+  { key: "whatsapp_outbound_daily_limit", label: "Outbound messages per day", secret: false, placeholder: "unlimited", help: "Total WhatsApp messages sent per calendar day, resetting at midnight server time. Applies on top of the limit above." },
 ];
 
 const ENV_FALLBACK: Record<string, string> = {
@@ -36,6 +43,10 @@ const ENV_FALLBACK: Record<string, string> = {
   microsoft_oauth_client_id: "MICROSOFT_OAUTH_CLIENT_ID",
   microsoft_oauth_client_secret: "MICROSOFT_OAUTH_CLIENT_SECRET",
   microsoft_oauth_redirect_uri: "MICROSOFT_OAUTH_REDIRECT_URI",
+  whatsapp_inbound_limit: "WHATSAPP_INBOUND_LIMIT",
+  whatsapp_outbound_limit: "WHATSAPP_OUTBOUND_LIMIT",
+  whatsapp_inbound_daily_limit: "WHATSAPP_INBOUND_DAILY_LIMIT",
+  whatsapp_outbound_daily_limit: "WHATSAPP_OUTBOUND_DAILY_LIMIT",
 };
 
 export function appSetting(key: string): string {

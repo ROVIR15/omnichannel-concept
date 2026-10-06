@@ -20,6 +20,16 @@
   .grp-hint { font-size:12px; color:var(--muted); margin-left:auto; }
   .grp-body { padding:16px; }
   @media (max-width:640px){ .grp-hint { margin-left:0; width:100%; } }
+  .usage { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; margin-top:16px; }
+  .usage-item { border:1px solid var(--line); border-radius:8px; padding:10px 12px; display:grid; gap:12px; }
+  .usage-label { font-weight:650; }
+  .usage-head { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); }
+  .usage-num { font-size:20px; font-weight:650; font-variant-numeric:tabular-nums; margin:2px 0 6px; }
+  .usage-num small { font-size:13px; font-weight:400; color:var(--muted); }
+  .meter { height:6px; border-radius:3px; background:var(--line); overflow:hidden; }
+  .meter > span { display:block; height:100%; background:var(--ok); transition:width .3s; }
+  .meter.near > span { background:var(--warn); }
+  .meter.full > span { background:var(--bad); }
 </style>
 </head>
 <body>
@@ -61,6 +71,9 @@ const GROUPS = [
     match: k => k.startsWith('google_') },
   { id:'microsoft', label:'Microsoft', hint:'Outlook OAuth through Microsoft Graph',
     match: k => k.startsWith('microsoft_') },
+  // Limits have defaults, so "set" means "customised", not "missing".
+  { id:'whatsapp', label:'WhatsApp message limits', hint:'count/seconds, e.g. 1000/60 = 1000 per minute · per day: a plain count · 0 = unlimited',
+    match: k => k.startsWith('whatsapp_') && k.endsWith('_limit'), optional: true, usage: true },
 ];
 
 let fields = [];
@@ -81,8 +94,8 @@ async function loadSettings() {
       <summary>
         <span class="chev" aria-hidden="true">▸</span>
         <span class="grp-title">${esc(g.label)}</span>
-        <span class="badge ${g.fields.every(f => f.configured) ? 'active' : 'pending'}">
-          ${g.fields.filter(f => f.configured).length}/${g.fields.length} set
+        <span class="badge ${g.optional || g.fields.every(f => f.configured) ? 'active' : 'pending'}">
+          ${g.fields.filter(f => f.configured).length}/${g.fields.length} ${g.optional ? 'custom' : 'set'}
         </span>
         <span class="grp-hint">${esc(g.hint)}</span>
       </summary>
@@ -92,14 +105,64 @@ async function loadSettings() {
               { ...f, label: `${f.label}${f.fromEnv ? ' · from .env' : ''}` },
               'data-key', f.value, f.configured)).join('')}
         </div>
+        ${g.usage ? '<div class="usage" id="waUsage" aria-live="polite"></div>' : ''}
       </div>
     </details>`).join('');
+  await loadUsage();
 }
+
+// Live usage for the WhatsApp limits, stored in the database (survives restarts).
+// One meter: a count against a limit (0 = unlimited).
+function meterHtml(title, used, limit, detail) {
+  const unlimited = limit === 0;
+  const pct = unlimited ? 0 : Math.min(100, Math.round(used / limit * 100));
+  return `
+    <div class="usage-row">
+      <div class="usage-head"><span>${esc(title)}</span><span>${unlimited ? 'unlimited' : `${pct}%`}</span></div>
+      <div class="usage-num">${used}${unlimited ? '' : ` <small>/ ${limit}</small>`}</div>
+      <div class="meter ${pct >= 100 ? 'full' : pct >= 80 ? 'near' : ''}"><span style="width:${pct}%"></span></div>
+      <div class="help">${detail}</div>
+    </div>`;
+}
+
+function waitText(ms) {
+  const m = Math.ceil(ms / 60000);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function usageHtml(label, u, verb) {
+  const w = u.window, d = u.daily;
+  const per = w.windowSeconds === 60 ? 'minute' : `${w.windowSeconds}s`;
+  return `
+    <div class="usage-item">
+      <div class="usage-label">${esc(label)}</div>
+      ${meterHtml(`Last ${per}`, w.used, w.limit,
+        `${w.rejected} ${verb}${w.rejectedSince ? ` since ${esc(new Date(w.rejectedSince).toLocaleString())}` : ''}`)}
+      ${meterHtml('Today', d.used, d.limit,
+        `${d.rejected} ${verb} today · resets at midnight, in ${waitText(d.resetInMs)}`)}
+    </div>`;
+}
+
+async function loadUsage() {
+  const el = $('#waUsage');
+  if (!el) return;
+  try {
+    const u = await api('/api/whatsapp/usage');
+    el.innerHTML = usageHtml('Inbound', u.inbound, 'dropped') + usageHtml('Outbound', u.outbound, 'rejected');
+  } catch {
+    el.innerHTML = '<div class="help">Usage unavailable.</div>';
+  }
+}
+setInterval(() => { if (!document.hidden) loadUsage(); }, 5000);
 
 $('#saveSettings').onclick = async () => {
   const patch = {};
   $$('#groups input[data-key]').forEach(i => patch[i.dataset.key] = i.value);
-  await jsonPost('/api/settings', patch);
+  try {
+    await jsonPost('/api/settings', patch);
+  } catch (err) {
+    return toast(err.message);
+  }
   await loadSettings();
   toast('Provider settings saved');
 };

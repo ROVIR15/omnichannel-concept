@@ -9,6 +9,8 @@ import {
   type FacebookChannel,
 } from "./oauth";
 import { seedIfEmpty } from "./seed";
+import { invalidLimitSetting } from "./limits";
+import { throttleInbound, whatsappUsage } from "./whatsapp";
 import { APP_SETTING_FIELDS, appSetting, maskedAppSettings, saveAppSettings } from "./settings";
 import {
   completeGmailOAuth,
@@ -155,7 +157,9 @@ async function handleWebhook(channel: ChannelType, req: Request, url: URL) {
     return new Response("invalid signature", { status: 401 });
   }
 
-  const result = ingest(parsed);
+  // Rate limit after verification so forged deliveries can't spend budget.
+  const { allowed, throttled } = throttleInbound(parsed);
+  const result = { ...ingest(allowed), throttled: throttled.length };
 
   // A delivery that carries no messages is normal (read receipts, edits,
   // delivery notices). Say which kinds arrived, so a silent inbox is
@@ -230,6 +234,7 @@ const server = Bun.serve({
 
     // --- App settings (the Meta app you own as the provider) -------------
     if (path === "/api/settings" && method === "GET") return json(maskedAppSettings());
+    if (path === "/api/whatsapp/usage" && method === "GET") return json(whatsappUsage());
 
     if (path === "/api/settings" && method === "POST") {
       const b = await body<Record<string, string>>(req);
@@ -240,8 +245,10 @@ const server = Bun.serve({
         const v = b[f.key];
         if (v === undefined) continue;
         if (f.secret && v === "") continue;
-        patch[f.key] = v;
+        patch[f.key] = v.trim();
       }
+      const invalid = invalidLimitSetting(patch);
+      if (invalid) return json({ error: invalid }, 400);
       saveAppSettings(patch);
       return json({ ok: true });
     }
