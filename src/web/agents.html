@@ -1,0 +1,172 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agents</title>
+<link rel="stylesheet" href="/web/shell.css" />
+<style>
+  main { max-width:900px; margin:0 auto; padding:24px 20px 64px; }
+  section { margin-bottom:36px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 12px; }
+
+  .people { border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .person { display:grid; grid-template-columns:minmax(0,1fr) 120px 110px auto; gap:12px; align-items:center; padding:11px 14px; border-top:1px solid var(--line); }
+  .person:first-child { border-top:0; }
+  .person .who { min-width:0; }
+  .person .who strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .person .who .sub { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .person select { padding:5px 8px; font-size:13px; }
+  .person .acts { display:flex; gap:6px; justify-content:flex-end; }
+  .empty { padding:18px 14px; color:var(--muted); font-size:13px; }
+
+  .presence { display:inline-flex; align-items:center; gap:6px; font-size:12px; text-transform:capitalize; }
+  .presence::before { content:''; width:8px; height:8px; border-radius:50%; background:var(--muted); opacity:.5; }
+  .presence.available::before { background:var(--ok); opacity:1; }
+  .presence.busy::before { background:var(--bad); opacity:1; }
+  .presence.away::before { background:var(--warn); opacity:1; }
+
+  @media (max-width:640px) {
+    .person { grid-template-columns:1fr 1fr; }
+    .person .who { grid-column:1 / -1; }
+    .person .acts { grid-column:1 / -1; justify-content:flex-start; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h2>Team</h2>
+    <p class="sub" style="margin:0 0 14px">
+      <strong>Admins</strong> set up channels and manage the team. <strong>Agents</strong> handle conversations and calls.
+      Everyone here can only see this organisation.
+    </p>
+    <div class="people" id="people"></div>
+  </section>
+
+  <section>
+    <h2>Add someone</h2>
+    <form class="card" id="addForm" novalidate>
+      <div class="grid">
+        <div class="field">
+          <label for="newName">Name</label>
+          <input id="newName" autocomplete="off" required />
+        </div>
+        <div class="field">
+          <label for="newEmail">Email</label>
+          <input id="newEmail" type="email" autocomplete="off" required />
+        </div>
+        <div class="field">
+          <label for="newRole">Role</label>
+          <select id="newRole">
+            <option value="agent">Agent</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="newPassword">Temporary password</label>
+          <input id="newPassword" type="text" autocomplete="new-password" required />
+          <div class="help">At least 8 characters. Share it with them privately; they can change it after signing in.</div>
+        </div>
+      </div>
+      <button type="submit">Add to team</button>
+    </form>
+  </section>
+</main>
+
+<script src="/web/shell.js"></script>
+<script>
+let people = [];
+
+function when(ts) {
+  return ts ? new Date(ts).toLocaleString() : 'never';
+}
+
+function personHtml(p) {
+  const self = p.id === me.id;
+  return `
+    <div class="person" data-id="${esc(p.id)}">
+      <div class="who">
+        <strong>${esc(p.name)}${self ? ' <span class="badge">you</span>' : ''}</strong>
+        <div class="sub">${esc(p.email)} · last sign-in ${esc(when(p.lastLoginAt))}</div>
+      </div>
+      <select data-act="role" aria-label="Role for ${esc(p.name)}" ${self ? 'disabled title="You can\'t change your own role"' : ''}>
+        <option value="agent" ${p.role === 'agent' ? 'selected' : ''}>Agent</option>
+        <option value="admin" ${p.role === 'admin' ? 'selected' : ''}>Admin</option>
+      </select>
+      <span class="presence ${esc(p.presence)}">${esc(p.presence)}</span>
+      <div class="acts">
+        <button class="ghost small" data-act="password">Reset password</button>
+        ${self ? '' : '<button class="danger small" data-act="remove">Remove</button>'}
+      </div>
+    </div>`;
+}
+
+async function loadPeople() {
+  if (!orgId) { $('#people').innerHTML = '<div class="empty">Pick an organisation first.</div>'; return; }
+  people = await api(`/api/agents?org=${encodeURIComponent(orgId)}`);
+  $('#people').innerHTML = people.length
+    ? people.map(personHtml).join('')
+    : '<div class="empty">No one yet. Add your first admin or agent below.</div>';
+}
+
+$('#people').addEventListener('change', async e => {
+  if (e.target.dataset.act !== 'role') return;
+  const id = e.target.closest('.person').dataset.id;
+  try {
+    await jsonPost(`/api/agents/${id}`, { role: e.target.value }, 'PATCH');
+    toast('Role updated');
+  } catch (err) { toast(err.message); }
+  await loadPeople();
+});
+
+$('#people').addEventListener('click', async e => {
+  const act = e.target.dataset.act;
+  if (!act || act === 'role') return;
+  const p = people.find(x => x.id === e.target.closest('.person').dataset.id);
+  if (!p) return;
+
+  if (act === 'password') {
+    const password = prompt(`New password for ${p.name} (at least 8 characters). They'll be signed out everywhere.`);
+    if (!password) return;
+    try {
+      await jsonPost(`/api/agents/${p.id}`, { password }, 'PATCH');
+      toast('Password reset');
+    } catch (err) { toast(err.message); }
+  }
+
+  if (act === 'remove') {
+    if (!confirm(`Remove ${p.name} from the team? They'll lose access immediately.`)) return;
+    try {
+      await api(`/api/agents/${p.id}`, { method: 'DELETE' });
+      toast('Removed');
+      await loadPeople();
+    } catch (err) { toast(err.message); }
+  }
+});
+
+$('#addForm').onsubmit = async e => {
+  e.preventDefault();
+  try {
+    await jsonPost('/api/agents', {
+      orgId,
+      name: $('#newName').value,
+      email: $('#newEmail').value,
+      role: $('#newRole').value,
+      password: $('#newPassword').value,
+    });
+    e.target.reset();
+    toast('Added');
+    await loadPeople();
+  } catch (err) { toast(err.message); }
+};
+
+window.addEventListener('orgchange', loadPeople);
+
+(async () => {
+  await mountShell({ active: '/agents' });
+  await loadPeople();
+})();
+</script>
+</body>
+</html>

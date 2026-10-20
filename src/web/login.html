@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign in</title>
+<link rel="stylesheet" href="/web/shell.css" />
+<style>
+  main { max-width:380px; margin:0 auto; padding:72px 16px 64px; }
+  h1 { font-size:20px; margin:0 0 4px; letter-spacing:-.01em; }
+  form { margin-top:20px; }
+  button[type=submit] { width:100%; margin-top:4px; }
+  .error { display:none; margin-top:12px; font-size:13px; padding:9px 12px; border-radius:8px; background:#dc26261a; color:var(--bad); }
+  .error.show { display:block; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Sign in</h1>
+  <p class="sub" id="intro">Omnichannel console</p>
+
+  <form id="form" novalidate>
+    <div class="field" id="nameField" hidden>
+      <label for="name">Your name</label>
+      <input id="name" autocomplete="name" />
+    </div>
+    <div class="field">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required />
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <div class="help" id="pwHelp" hidden>At least 8 characters.</div>
+    </div>
+    <button type="submit" id="submit">Sign in</button>
+    <div class="error" id="error" role="alert"></div>
+  </form>
+</main>
+
+<script src="/web/shell.js"></script>
+<script>
+let setup = false;
+
+// Only same-site paths, so ?next= can't bounce someone to another site.
+function nextPath(role) {
+  const next = new URLSearchParams(location.search).get('next') || '';
+  if (next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/login')) return next;
+  return role === 'operator' ? '/' : '/inbox';
+}
+
+function showError(msg) {
+  $('#error').textContent = msg;
+  $('#error').classList.add('show');
+}
+
+(async () => {
+  const state = await api('/api/auth/state');
+  setup = state.setupNeeded;
+  if (!setup) return;
+  // Fresh install: the first account runs the platform.
+  $('#title').textContent = 'Create the first account';
+  $('#intro').textContent = 'This account is the platform operator. It can see every organisation and add admins and agents.';
+  $('#nameField').hidden = false;
+  $('#pwHelp').hidden = false;
+  $('#password').autocomplete = 'new-password';
+  $('#submit').textContent = 'Create account';
+})();
+
+$('#form').onsubmit = async e => {
+  e.preventDefault();
+  $('#error').classList.remove('show');
+  $('#submit').disabled = true;
+  try {
+    const payload = { email: $('#email').value, password: $('#password').value };
+    if (setup) payload.name = $('#name').value;
+    const user = await jsonPost(setup ? '/api/auth/setup' : '/api/auth/login', payload);
+    location.href = nextPath(user.role);
+  } catch (err) {
+    showError(err.message);
+    $('#submit').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

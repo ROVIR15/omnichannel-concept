@@ -24,6 +24,9 @@ nav a {
 }
 nav a:hover { color:var(--accent); background:#00000008; }
 nav a.on { color:var(--accent); background:#2563eb14; font-weight:600; }
+header .me { display:flex; align-items:center; gap:6px; }
+header .me-name { font-size:13px; font-weight:600; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+header #presence { padding:4px 8px; font-size:12px; }
 
 /* ---- controls ---- */
 input, select, textarea {
