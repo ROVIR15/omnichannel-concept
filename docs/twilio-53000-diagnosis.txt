@@ -1,0 +1,109 @@
+Twilio Voice — ConnectionError 53000 diagnosis log
+Date: 2026-10-07
+Branch: feat/agents-auth
+Page: /voice (src/web/voice.html, @twilio/voice-sdk 2.18.5)
+
+SYMPTOM
+-------
+Browser shows:
+  Error: ConnectionError (53000): Raised whenever a signaling connection error
+  occurs that is not covered by a more specific error code.
+Twilio.Device never reaches "registered".
+
+CODE REVIEW
+-----------
+- src/voice/twilio.ts voiceToken(): HS256 JWT, header cty "twilio-fpa;v=1",
+  iss = API Key SID, sub = Account SID, voice grant with outgoing
+  application_sid + incoming allow. Format matches Twilio spec. OK.
+- src/voice/routes.ts /api/voice/token: identity = user.id (string). OK.
+- No CSP blocking connect-src to Twilio. OK.
+Conclusion: token generation code is correct.
+
+CREDENTIAL CHECKS (values masked)
+---------------------------------
+Stored settings (data/omnichannel.sqlite):
+  Account SID     AC3e…871e  (len 34)
+  API Key SID     SKbd…507f  (len 34)
+  API Key Secret  (len 32)
+  TwiML App SID   AP3b…4576  (len 34)
+
+1. API Key SID + Secret -> GET Applications/{TwiML App}
+     api.twilio.com              401 The authorization with Key failed
+     api.dublin.ie1.twilio.com   401 The authorization with Key failed
+     api.sydney.au1.twilio.com   401 The authorization with Key failed
+
+2. Account SID + Auth Token -> GET Applications/{TwiML App}
+     200  "Patina"                 (TwiML App exists)
+
+3. Account SID + Auth Token -> GET Keys/{API Key SID}
+     200  "Patina Twilio"          (API Key exists on account)
+
+4. Account SID + Auth Token -> GET iam.twilio.com/v1/Keys
+     200  SKbdb4…507f Patina Twilio, SK17fd…ba14 Patina,
+          SKd4d0…e185 BPO (James), SK4747…9eb6 Self-Checkin,
+          SKaac7…41dc Studio API Key
+
+ROOT CAUSE
+----------
+The saved API Key Secret does not belong to API Key SKbd…507f. The browser
+access token is signed with the wrong secret, Twilio rejects it and closes
+the signaling WebSocket, and the SDK reports the generic 53000 error.
+
+FIX
+---
+1. Twilio Console -> Account -> API keys & tokens -> create a new Standard key
+   (the secret is shown only once, at creation).
+2. Settings -> Twilio: paste the new API Key SID and its Secret together.
+3. Reload /voice; expect "registered for incoming calls".
+4. Optional: rerun check #1 to confirm the key/secret pair returns 200.
+
+CURL TEST
+---------
+Load the saved settings into shell variables (or set them by hand):
+  DB=data/omnichannel.sqlite
+  s() { sqlite3 "$DB" "SELECT value FROM app_settings WHERE key='$1'"; }
+  ACCOUNT_SID=$(s twilio_account_sid)
+  AUTH_TOKEN=$(s twilio_auth_token)
+  API_KEY_SID=$(s twilio_api_key_sid)
+  API_KEY_SECRET=$(s twilio_api_key_secret)
+  TWIML_APP_SID=$(s twilio_twiml_app_sid)
+
+Test the API Key + Secret pair (the one that signs browser tokens).
+Expect 200; 401 "The authorization with Key failed" = wrong secret:
+  curl -s -w '\nHTTP %{http_code}\n' -u "$API_KEY_SID:$API_KEY_SECRET" \
+    "https://api.twilio.com/2010-04-01/Accounts/$ACCOUNT_SID/Applications/$TWIML_APP_SID.json"
+
+Test Account SID + Auth Token (control check, should be 200):
+  curl -s -w '\nHTTP %{http_code}\n' -u "$ACCOUNT_SID:$AUTH_TOKEN" \
+    "https://api.twilio.com/2010-04-01/Accounts/$ACCOUNT_SID/Keys/$API_KEY_SID.json"
+
+UPDATE — still 53000 after the key fix
+--------------------------------------
+API Key now SK3e…f66e; key/secret check returns HTTP 200 (credentials OK).
+
+Opened the Voice SDK signaling socket directly
+(wss://voice-js.roaming.twilio.com/signal) with a token from voiceToken():
+  ws open
+  msg: {"type":"error","payload":{"error":{"code":31203,
+        "message":"Voice Calls are disabled."}}}
+  ws close 1000
+
+Account (Account SID + Auth Token):
+  status=active, type=Full, friendly_name="Delta CS BPO", balance 5383 JPY
+
+ROOT CAUSE (current)
+--------------------
+Twilio accepts the token but voice calling is turned off on the account
+(error 31203). The SDK shows this as the generic 53000. The app code can't
+change this; it has to be fixed on the Twilio account.
+
+FIX
+---
+1. Twilio Console -> Voice -> Settings -> General: check that voice / the
+   Voice SDK isn't disabled; check Geo Permissions for the countries you call.
+2. If nothing is disabled there, contact Twilio Support (JPY account: it may
+   be managed by KDDI Web Communications, the Japanese reseller) and quote
+   "error 31203 Voice Calls are disabled" plus the Account SID.
+
+Repro test: scratchpad ws.ts (generate token -> send "listen" to the signal
+socket -> print the reply).

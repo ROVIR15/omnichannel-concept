@@ -1,6 +1,9 @@
 // HTTP surface: webhooks in, console + agent API out.
 // Note the shape of every webhook handler: verify, hand off, respond fast.
 
+import { authorize, availableUserIds, getUser, handleAuthRoutes } from "./auth";
+import { sqlite } from "./db";
+import { initVoice } from "./voice";
 import { ingest, inbox, reply, startConversation } from "./core";
 import { signingSecrets } from "./connectors/meta";
 import { connectorFor } from "./registry";
@@ -35,6 +38,25 @@ import {
 import type { Attachment, ChannelAccount, ChannelType, WebhookRequest } from "./types";
 
 seedIfEmpty();
+
+// Phone calls (src/voice): Twilio settings from Settings, people from auth,
+// caller names from contacts.
+const voice = initVoice({
+  db: sqlite,
+  settings: () => ({
+    accountSid: appSetting("twilio_account_sid"),
+    authToken: appSetting("twilio_auth_token"),
+    apiKeySid: appSetting("twilio_api_key_sid"),
+    apiKeySecret: appSetting("twilio_api_key_secret"),
+    twimlAppSid: appSetting("twilio_twiml_app_sid"),
+    phoneNumber: appSetting("twilio_phone_number"),
+    transcription: /^(on|true|yes|1)$/i.test(appSetting("twilio_transcription").trim()),
+  }),
+  users: { get: getUser, available: availableUserIds },
+  contactName: (phone) => sqlite.query<{ display_name: string }, [string]>(
+    "SELECT display_name FROM contacts WHERE primary_phone = ? LIMIT 1",
+  ).get(phone)?.display_name ?? null,
+});
 
 const PORT = Number(process.env.PORT ?? 3000);
 const CHANNELS: ChannelType[] = ["messenger", "instagram", "whatsapp", "line", "email"];
@@ -192,9 +214,23 @@ const server = Bun.serve({
 
     if (path === "/health") return json({ ok: true });
 
+    // Sign-in and role/organisation checks for everything below.
+    const auth = await authorize(req, url);
+    if (!auth.ok) return auth.response;
+    const { user, token } = auth;
+
+    const authRes = await handleAuthRoutes(req, url, user, token);
+    if (authRes) return authRes;
+
+    const voiceRes = await voice.handle(req, url, user);
+    if (voiceRes) return voiceRes;
+
     // --- Pages ----------------------------------------------------------
+    if (path === "/login") return page("login.html");
     if (path === "/" || path === "/settings" || path === "/console") return page("index.html");
     if (path === "/channels") return page("channels.html");
+    if (path === "/agents") return page("agents.html");
+    if (path === "/voice") return page("voice.html");
     if (path === "/inbox") return page("inbox.html");
     if (path === "/permissions") return page("permissions.html");
     if (path === "/web/shell.css") return asset("shell.css");
@@ -208,7 +244,10 @@ const server = Bun.serve({
     if (path === "/webhooks/email") return handleWebhook("email", req, url);
 
     // --- Organisations --------------------------------------------------
-    if (path === "/api/orgs" && method === "GET") return json(listOrgs());
+    if (path === "/api/orgs" && method === "GET") {
+      // Operators see every organisation; everyone else only their own.
+      return json(user?.role === "operator" ? listOrgs() : listOrgs().filter((o) => o.id === user?.orgId));
+    }
 
     if (path === "/api/orgs" && method === "POST") {
       const b = await body<{ name?: string }>(req);
