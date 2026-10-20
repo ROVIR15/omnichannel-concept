@@ -139,6 +139,36 @@ CREATE TABLE IF NOT EXISTS rate_limit_daily (
   PRIMARY KEY (limiter, key, day)
 );
 
+-- People who sign in (src/auth). An operator runs the platform and sees
+-- every organisation (org_id NULL); admins and agents belong to one org.
+CREATE TABLE IF NOT EXISTS users (
+  id             TEXT PRIMARY KEY,
+  org_id         TEXT REFERENCES organisations(id) ON DELETE CASCADE,
+  email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  name           TEXT NOT NULL,
+  password_hash  TEXT NOT NULL,
+  role           TEXT NOT NULL CHECK (role IN ('operator', 'admin', 'agent')),
+  -- Agent availability, for routing calls and chats.
+  presence       TEXT NOT NULL DEFAULT 'offline'
+                 CHECK (presence IN ('available', 'busy', 'away', 'offline')),
+  created_at     INTEGER NOT NULL,
+  last_login_at  INTEGER,
+  CHECK ((role = 'operator') = (org_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
+
+-- Only a hash of the cookie token is stored, so a leaked database can't be
+-- replayed as live sessions.
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash  TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+-- Voice tables live with the voice package: src/voice/schema.ts.
+
 -- Idempotency: platforms retry webhooks, sometimes for hours.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external
   ON messages(external_message_id) WHERE external_message_id IS NOT NULL;

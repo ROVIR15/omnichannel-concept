@@ -1,0 +1,215 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice</title>
+<link rel="stylesheet" href="/web/shell.css" />
+<script src="https://cdn.jsdelivr.net/npm/@twilio/voice-sdk@2.18.5/dist/twilio.min.js"></script>
+<style>
+  main { max-width:520px; margin:0 auto; padding:24px 16px 64px; }
+  section { margin-bottom:28px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 12px; }
+  .state { display:flex; align-items:center; gap:8px; font-weight:600; }
+  .state::before { content:''; width:10px; height:10px; border-radius:50%; background:var(--muted); opacity:.5; }
+  .state.ready::before { background:var(--ok); opacity:1; }
+  .state.busy::before { background:var(--warn); opacity:1; }
+  .state.error::before { background:var(--bad); opacity:1; }
+  .dial { display:flex; gap:8px; }
+  .dial input { font-size:16px; }
+  .incoming { display:none; border-color:var(--accent); }
+  .incoming.show { display:block; }
+  .call-btns { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  button.hangup { background:var(--bad); }
+  #log { font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); max-height:220px; overflow:auto; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h2>Phone</h2>
+    <div class="card">
+      <div class="state" id="state">Connecting…</div>
+      <div class="sub" id="numberLine" style="margin-top:4px"></div>
+    </div>
+  </section>
+
+  <section class="card incoming" id="incoming" aria-live="assertive">
+    <strong>Incoming call</strong>
+    <div class="sub" id="incomingFrom"></div>
+    <div class="call-btns">
+      <button id="accept">Answer</button>
+      <button class="ghost" id="reject">Decline</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Call a number</h2>
+    <form class="dial" id="dialForm">
+      <input id="to" type="tel" placeholder="+628123456789" autocomplete="tel" aria-label="Phone number" />
+      <button type="submit" id="callBtn" disabled>Call</button>
+    </form>
+    <div class="help">Full international format, starting with +.</div>
+    <div class="call-btns">
+      <button class="ghost" id="mute" disabled>Mute</button>
+      <button class="hangup" id="hangup" disabled>Hang up</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Log</h2>
+    <div class="card" id="log"></div>
+  </section>
+</main>
+
+<script src="/web/shell.js"></script>
+<script>
+let device = null;
+let call = null;   // the active call
+let ringing = null; // an incoming call not yet answered
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  $('#log').textContent = `${t}  ${msg}\n` + $('#log').textContent;
+}
+
+function setState(text, cls) {
+  $('#state').textContent = text;
+  $('#state').className = `state ${cls || ''}`;
+}
+
+// The SDK reports most signaling rejections as a generic 53000. Ask Twilio's
+// signaling server directly with the same token to get the real error.
+function probeSignaling(token) {
+  return new Promise(resolve => {
+    let ws;
+    const done = r => { clearTimeout(timer); try { ws.close(); } catch {} resolve(r); };
+    const timer = setTimeout(() => done(null), 8000);
+    try { ws = new WebSocket('wss://voice-js.roaming.twilio.com/signal'); }
+    catch { return done(null); }
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'listen', version: '1.6', payload: { token, browserinfo: { p: 'browser', v: '1.0' } } }));
+    ws.onmessage = e => {
+      let m; try { m = JSON.parse(e.data); } catch { return; }
+      if (m.type === 'error') done(m.payload?.error ?? null);
+      else if (m.type === 'ready') done({ ok: true });
+    };
+    ws.onerror = () => done({ network: true });
+  });
+}
+
+const REASONS = {
+  31203: 'Voice calling is disabled on this Twilio account. Enable it in Twilio Console → Voice → Settings, or ask Twilio Support.',
+  31202: 'Twilio rejected the access token. Check API Key SID and Secret in Settings → Twilio.',
+  31204: 'Twilio rejected the access token. Check API Key SID and Secret in Settings → Twilio.',
+  31205: 'The access token expired. Reload the page.',
+  20101: 'Twilio rejected the access token. Check API Key SID and Secret in Settings → Twilio.',
+  20104: 'The access token expired. Reload the page.',
+};
+
+async function explainError(e, token) {
+  if (e.code !== 53000 && !REASONS[e.code]) return `Error: ${e.message}`;
+  const r = await probeSignaling(token);
+  if (r?.code) {
+    log(`twilio says ${r.code}: ${r.message}`);
+    return REASONS[r.code] ?? `Twilio: ${r.message} (${r.code})`;
+  }
+  if (r?.network) return 'Could not reach Twilio — check your network, VPN or browser blockers.';
+  return REASONS[e.code] ?? `Error: ${e.message}`;
+}
+
+function inCall(c) {
+  call = c;
+  $('#hangup').disabled = !c;
+  $('#mute').disabled = !c;
+  $('#mute').textContent = 'Mute';
+  $('#callBtn').disabled = !!c || !device;
+  setState(c ? 'On a call' : 'Ready — you can call and receive calls', c ? 'busy' : 'ready');
+  if (!c) return;
+  c.on('accept', () => log('connected'));
+  c.on('disconnect', () => { log('call ended'); inCall(null); });
+  c.on('cancel', () => { log('caller hung up'); inCall(null); });
+  c.on('error', e => { log(`call error: ${e.message}`); inCall(null); });
+}
+
+async function setup() {
+  if (!window.Twilio?.Device) { setState('Could not load the Twilio SDK', 'error'); return; }
+  let t;
+  try {
+    t = await api('/api/voice/token');
+  } catch (err) {
+    setState(err.message, 'error');
+    log(err.message + ' — fill them in on Settings → Twilio.');
+    return;
+  }
+  $('#numberLine').textContent = `Business number: ${t.phoneNumber}`;
+
+  device = new Twilio.Device(t.token, { logLevel: 'warn', closeProtection: true });
+
+  device.on('registered', () => { setState('Ready — you can call and receive calls', 'ready'); $('#callBtn').disabled = !!call; log('registered for incoming calls'); });
+  device.on('error', async e => {
+    log(`device error ${e.code ?? ''}: ${e.message}`);
+    setState(`Error: ${e.message}`, 'error');
+    setState(await explainError(e, t.token), 'error');
+  });
+  device.on('tokenWillExpire', async () => {
+    try { t.token = (await api('/api/voice/token')).token; device.updateToken(t.token); log('token refreshed'); }
+    catch (err) { log(`token refresh failed: ${err.message}`); }
+  });
+
+  device.on('incoming', c => {
+    ringing = c;
+    $('#incomingFrom').textContent = `From ${c.parameters.From}`;
+    $('#incoming').classList.add('show');
+    log(`incoming call from ${c.parameters.From}`);
+    const clear = () => { if (ringing === c) { ringing = null; $('#incoming').classList.remove('show'); } };
+    c.on('cancel', () => { log('missed — caller hung up'); clear(); });
+    c.on('disconnect', clear);
+    c.on('reject', clear);
+  });
+
+  await device.register();
+}
+
+$('#accept').onclick = () => {
+  if (!ringing) return;
+  const c = ringing;
+  ringing = null;
+  $('#incoming').classList.remove('show');
+  c.accept();
+  inCall(c);
+};
+
+$('#reject').onclick = () => {
+  if (!ringing) return;
+  ringing.reject();
+  log('declined');
+};
+
+$('#dialForm').onsubmit = async e => {
+  e.preventDefault();
+  const to = $('#to').value.replace(/[\s()-]/g, '');
+  if (!/^\+[1-9]\d{6,14}$/.test(to)) { toast('Use the full number, e.g. +628123456789'); return; }
+  log(`calling ${to}…`);
+  try {
+    inCall(await device.connect({ params: { To: to } }));
+  } catch (err) { log(`could not call: ${err.message}`); }
+};
+
+$('#hangup').onclick = () => call?.disconnect();
+
+$('#mute').onclick = () => {
+  if (!call) return;
+  const muted = !call.isMuted();
+  call.mute(muted);
+  $('#mute').textContent = muted ? 'Unmute' : 'Mute';
+};
+
+(async () => {
+  await mountShell({ active: '/voice' });
+  // Calls only ring browsers whose status is "available".
+  if (me.presence !== 'available') log(`your status is "${me.presence}" — set it to available to receive calls`);
+  await setup();
+})();
+</script>
+</body>
+</html>
