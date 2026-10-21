@@ -19,6 +19,7 @@ const NAV = [
   { href: '/inbox',       label: 'Inbox',       min: 'agent' },
   { href: '/voice',       label: 'Voice',       min: 'agent' },
   { href: '/agents',      label: 'Agents',      min: 'admin' },
+  { href: '/shopify',     label: 'Shopify',     min: 'admin' },
   { href: '/permissions', label: 'Permissions', min: 'operator' },
   { href: '/',            label: 'Settings',    min: 'operator' },
 ];

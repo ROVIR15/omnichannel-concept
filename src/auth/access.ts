@@ -30,7 +30,7 @@ const RULES: Rule[] = [
   { method: "GET", path: /^\/api\/voice\/token$/, min: "agent", orgFree: true },
   // Calls have no org yet (one platform number); the routes limit agents to their own calls.
   { method: "GET", path: /^\/api\/voice\/calls(\/[^/]+\/transcript)?$/, min: "agent", orgFree: true },
-  { method: "GET", path: /^\/(channels|agents)$/, min: "admin", orgFree: true },
+  { method: "GET", path: /^\/(channels|agents|shopify)$/, min: "admin", orgFree: true },
   // An organisation's phone numbers: org in the query, or orgId in the body.
   { method: "GET", path: /^\/api\/voice\/numbers$/, min: "admin" },
   { method: "POST", path: /^\/api\/voice\/numbers(\/check)?$/, min: "admin" },
@@ -54,8 +54,9 @@ const RULES: Rule[] = [
   // Channel setup.
   { method: "POST", path: /^\/api\/channels$/, min: "admin" },
   { method: "DELETE", path: /^\/api\/channels\/[^/]+$/, min: "admin" },
-  { method: "GET", path: /^\/api\/integrations\/(gmail|outlook|facebook)\/connect$/, min: "admin" },
-  { method: "POST", path: /^\/api\/integrations\/(gmail|outlook)\/disconnect$/, min: "admin" },
+  { method: "GET", path: /^\/api\/integrations\/(gmail|outlook|facebook|shopify)\/connect$/, min: "admin" },
+  { method: "POST", path: /^\/api\/integrations\/(gmail|outlook|shopify)\/disconnect$/, min: "admin" },
+  { method: "GET", path: /^\/api\/integrations\/shopify\/(status|products|inventory|orders|customers|content|policies)$/, min: "admin" },
   // The provider redirects here; the single-use state minted by /connect carries the org.
   { method: "GET", path: /^\/api\/integrations\/(gmail|outlook|facebook)\/callback$/, min: "admin", orgFree: true },
   { method: "GET", path: /^\/api\/integrations\/facebook\/status$/, min: "admin", orgFree: true },
@@ -74,7 +75,13 @@ export function isPublic(path: string, method: string): boolean {
     || path === "/web/shell.js"
     || path.startsWith("/webhooks/")
     || (method === "GET" && path === "/api/auth/state")
-    || (method === "POST" && (path === "/api/auth/login" || path === "/api/auth/setup"));
+    || (method === "POST" && (path === "/api/auth/login" || path === "/api/auth/setup"))
+    // Shopify's redirect back is a cross-site top-level navigation; the browser
+    // that started it may have lost its session cookie by the time it returns
+    // (tunnel host rotation, long consent screens). The single-use state this
+    // app minted, plus Shopify's own HMAC on the query string, already prove
+    // who this is — the session is not what's guarding this request.
+    || (method === "GET" && path === "/api/integrations/shopify/callback");
 }
 
 function ruleFor(method: string, path: string): Rule | undefined {
