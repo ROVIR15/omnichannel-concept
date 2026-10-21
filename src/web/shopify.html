@@ -1,0 +1,463 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shopify</title>
+  <link rel="stylesheet" href="/web/shell.css" />
+  <style>
+    main {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 24px 20px 64px;
+    }
+
+    section {
+      margin-bottom: 36px;
+    }
+
+    h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      margin: 0 0 12px;
+    }
+
+    .scopes {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 13px;
+    }
+
+    .scopes li {
+      margin-bottom: 4px;
+    }
+
+    .scopes code {
+      background: #00000010;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .connect-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 18px;
+    }
+
+    button.shopify {
+      background: #95bf47;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .tab {
+      padding: 7px 13px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    .tab:hover {
+      border-color: var(--accent);
+    }
+
+    .tab.on {
+      border-color: var(--accent);
+      background: #2563eb12;
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    table.data {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    table.data th {
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--muted);
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    table.data td {
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    table.data tr:last-child td {
+      border-bottom: 0;
+    }
+
+    table.data td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .p-thumb {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: var(--line);
+      display: block;
+    }
+
+    .p-title-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .p-title {
+      font-weight: 600;
+    }
+
+    .p-sub {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .pill {
+      font-size: 11px;
+      text-transform: capitalize;
+      padding: 2px 9px;
+      border-radius: 99px;
+      font-weight: 600;
+    }
+
+    .pill.active {
+      background: #16a34a1a;
+      color: var(--ok);
+    }
+
+    .pill.draft {
+      background: #00000012;
+      color: var(--muted);
+    }
+
+    .pill.archived {
+      background: #dc26261a;
+      color: var(--bad);
+    }
+
+    .stock {
+      font-weight: 600;
+    }
+
+    .stock.low {
+      color: var(--bad);
+    }
+
+    details.policy {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+
+    details.policy>summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    details.policy>summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.policy[open]>summary {
+      border-bottom: 1px solid var(--line);
+    }
+
+    details.policy .chev {
+      display: inline-block;
+      transition: transform .15s;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    details.policy[open]>summary .chev {
+      transform: rotate(90deg);
+    }
+
+    details.policy .p-sub {
+      margin-left: auto;
+    }
+
+    .policy-body {
+      margin: 0;
+      padding: 14px;
+      font: inherit;
+      white-space: pre-wrap;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+
+<body>
+
+  <main>
+    <section>
+      <h2>Provider app</h2>
+      <p class="sub" style="margin:0 0 14px">
+        The Shopify app <strong>you</strong> own as the tech provider. Secrets stay on the server
+        and are never returned to this page.
+      </p>
+      <div class="card">
+        <div class="grid" id="appFields"></div>
+      </div>
+      <div class="help" style="margin-top:4px">
+        Redirect URI → <code id="redirectUri"></code> — must be listed under the app's
+        Allowed redirection URL(s) in the Partner Dashboard.
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="saveSettings">Save provider settings</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Store connection</h2>
+      <div class="card" id="statusCard"></div>
+
+      <div class="card">
+        <div class="field">
+          <label>Shopify store domain</label>
+          <input id="shopDomain" placeholder="my-store.myshopify.com" />
+          <div class="help">The store this organisation connects. Accepts "my-store" or the full *.myshopify.com domain.
+          </div>
+        </div>
+
+        <div class="field">
+          <label>This app will request</label>
+          <ul class="scopes">
+            <li><code>read_products</code> — products and collections</li>
+            <li><code>read_inventory</code> — stock levels across locations</li>
+            <li><code>read_locations</code> — required by Shopify to look up those locations</li>
+            <li><code>read_orders</code> — order history and fulfillment status</li>
+            <li><code>read_customers</code> — customer profiles and order attribution</li>
+            <li><code>read_content</code> — pages, blogs and blog articles</li>
+            <li><code>read_legal_policies</code> — store policies (refund, privacy, terms)</li>
+          </ul>
+        </div>
+
+        <div class="status" id="connectStatus"></div>
+
+        <div class="connect-row">
+          <button class="shopify" id="btnConnect">Connect with Shopify</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="dataSection" style="display:none">
+      <h2>Store data</h2>
+      <div class="tabs" id="dataTabs"></div>
+      <div class="card">
+        <div id="dataStatus" class="sub">Loading…</div>
+        <div id="dataTable" style="overflow-x:auto"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/web/shell.js"></script>
+  <script>
+    const APP_FIELD_KEYS = ['shopify_api_key', 'shopify_api_secret', 'shopify_oauth_redirect_uri'];
+    let appFields = [];
+    let status = { configured: false, connected: false, shopDomain: null, scope: null };
+
+    function setConnectStatus(msg, kind) {
+      const n = $('#connectStatus');
+      n.className = msg ? 'status show ' + kind : 'status';
+      n.textContent = msg || '';
+    }
+
+    async function loadAppFields() {
+      const all = await api('/api/settings');
+      appFields = all.filter(f => APP_FIELD_KEYS.includes(f.key));
+      $('#appFields').innerHTML = appFields.map(f => fieldHtml(f, 'data-key', f.value, f.configured)).join('');
+    }
+
+    $('#saveSettings').onclick = async () => {
+      const patch = {};
+      $$('#appFields input[data-key]').forEach(i => patch[i.dataset.key] = i.value);
+      try {
+        await jsonPost('/api/settings', patch);
+        await loadAppFields();
+        await loadStatus();
+        toast('Provider settings saved');
+      } catch (err) { toast(err.message); }
+    };
+
+    async function loadStatus() {
+      status = await api(`/api/integrations/shopify/status?org=${encodeURIComponent(orgId)}`);
+      $('#statusCard').innerHTML = status.connected
+        ? `<div class="row spread">
+         <div>
+           <div style="font-weight:640">${esc(status.shopDomain)} <span class="badge connected">connected</span></div>
+           <div class="sub">Scopes: ${esc(status.scope || '')}</div>
+         </div>
+         <button class="danger" id="btnDisconnect">Disconnect</button>
+       </div>`
+        : `<div class="sub">${status.configured
+          ? 'No store connected to this organisation yet.'
+          : 'Save the Shopify API key, secret and redirect URI above before connecting a store.'}</div>`;
+
+      const dc = $('#btnDisconnect');
+      if (dc) dc.onclick = async () => {
+        if (!confirm(`Disconnect ${status.shopDomain}?`)) return;
+        try {
+          await jsonPost('/api/integrations/shopify/disconnect', { orgId });
+          await loadStatus();
+          toast('Shopify disconnected');
+        } catch (e) { setConnectStatus(e.message, 'err'); }
+      };
+
+      $('#btnConnect').disabled = !status.configured;
+      if (status.shopDomain && !$('#shopDomain').value) $('#shopDomain').value = status.shopDomain;
+
+      $('#dataSection').style.display = status.connected ? '' : 'none';
+      if (status.connected) { renderTabs(); loadResource(activeResource); }
+    }
+
+    // ---------- store data tabs ----------
+    const RESOURCES = {
+      products: {
+        label: 'Products', columns: [
+          {
+            key: 'title', label: 'Product', render: p => `
+              <div class="p-title-cell">
+                ${p.imageUrl ? `<img class="p-thumb" src="${esc(p.imageUrl)}" alt="" loading="lazy" />`
+                : `<span class="p-thumb"></span>`}
+                <div>
+                  <div class="p-title">${esc(p.title)}</div>
+                  <div class="p-sub">${esc(p.vendor || '—')}${p.productType ? ' · ' + esc(p.productType) : ''}</div>
+                </div>
+              </div>` },
+          { key: 'status', label: 'Status', render: p => `<span class="pill ${esc(p.status)}">${esc(p.status)}</span>` },
+          { key: 'price', label: 'Price', num: true, render: p => p.minPrice === p.maxPrice ? `$${esc(p.minPrice)}` : `$${esc(p.minPrice)}–$${esc(p.maxPrice)}` },
+          { key: 'variantCount', label: 'Variants', num: true },
+          { key: 'totalInventory', label: 'In stock', num: true, render: p => `<span class="stock ${p.totalInventory <= 0 ? 'low' : ''}">${esc(p.totalInventory)}</span>` },
+        ]
+      },
+      // inventory: {
+      //   label: 'Inventory', columns: [
+      //     { key: 'locationName', label: 'Location' }, { key: 'inventoryItemId', label: 'Inventory item' },
+      //     { key: 'available', label: 'Available', num: true },
+      //   ]
+      // },
+      orders: {
+        label: 'Orders', columns: [
+          { key: 'name', label: 'Order' }, { key: 'customerName', label: 'Customer' },
+          { key: 'financialStatus', label: 'Payment' }, { key: 'fulfillmentStatus', label: 'Fulfillment' },
+          { key: 'totalPrice', label: 'Total', num: true }, { key: 'createdAt', label: 'Placed', fmt: v => new Date(v).toLocaleString() },
+        ]
+      },
+      customers: {
+        label: 'Customers', columns: [
+          { key: 'name', label: 'Name' }, { key: 'email', label: 'Email' },
+          { key: 'ordersCount', label: 'Orders', num: true }, { key: 'totalSpent', label: 'Total spent', num: true },
+        ]
+      },
+      // content: {
+      //   label: 'Content', columns: [
+      //     { key: 'kind', label: 'Type' }, { key: 'title', label: 'Title' }, { key: 'handle', label: 'Handle' },
+      //     { key: 'publishedAt', label: 'Updated', fmt: v => v ? new Date(v).toLocaleString() : '—' },
+      //   ]
+      // },
+      policies: {
+        label: 'Legal policies', cards: true,
+        render: p => `
+          <details class="policy">
+            <summary>
+              <span class="chev" aria-hidden="true">▸</span>
+              <span class="p-title">${esc(p.title)}</span>
+              <span class="p-sub">${p.updatedAt ? 'updated ' + new Date(p.updatedAt).toLocaleDateString() : ''}</span>
+              ${p.url ? `<a class="sub" href="${esc(p.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">view on store ↗</a>` : ''}
+            </summary>
+            <pre class="policy-body">${esc(p.body || '(no content)')}</pre>
+          </details>` },
+    };
+    let activeResource = 'products';
+
+    function renderTabs() {
+      $('#dataTabs').innerHTML = Object.entries(RESOURCES).map(([key, r]) =>
+        `<button class="tab ${key === activeResource ? 'on' : ''}" data-tab="${key}">${esc(r.label)}</button>`).join('');
+      $$('[data-tab]').forEach(b => b.onclick = () => {
+        activeResource = b.dataset.tab;
+        renderTabs();
+        loadResource(activeResource);
+      });
+    }
+
+    async function loadResource(key) {
+      const spec = RESOURCES[key];
+      $('#dataStatus').textContent = 'Loading…';
+      $('#dataStatus').style.display = '';
+      $('#dataTable').innerHTML = '';
+      try {
+        const r = await api(`/api/integrations/shopify/${key}?org=${encodeURIComponent(orgId)}`);
+        if (!r.items.length) { $('#dataStatus').textContent = 'Nothing to show yet.'; return; }
+        $('#dataStatus').style.display = 'none';
+        $('#dataTable').innerHTML = spec.cards
+          ? r.items.map(spec.render).join('')
+          : `
+      <table class="data">
+        <thead><tr>${spec.columns.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${r.items.map(item => `<tr>${spec.columns.map(c =>
+            `<td class="${c.num ? 'num' : ''}">${c.render ? c.render(item) : esc(c.fmt ? c.fmt(item[c.key]) : item[c.key])}</td>`).join('')}</tr>`).join('')}
+        </tbody>
+      </table>`;
+      } catch (e) {
+        $('#dataStatus').textContent = 'Could not load: ' + e.message;
+      }
+    }
+
+    $('#btnConnect').onclick = () => {
+      const shop = $('#shopDomain').value.trim();
+      if (!shop) { setConnectStatus('Enter the store domain first.', 'err'); return; }
+      location.href = `/api/integrations/shopify/connect?org=${encodeURIComponent(orgId)}&shop=${encodeURIComponent(shop)}`;
+    };
+
+    (async () => {
+      await mountShell({ active: '/shopify' });
+      const q = new URLSearchParams(location.search);
+      const org = q.get('org');
+      if (org) { orgId = org; localStorage.setItem('orgId', orgId); await loadOrgs(); }
+
+      $('#redirectUri').textContent = location.origin + '/api/integrations/shopify/callback';
+
+      await loadAppFields();
+      await loadStatus();
+
+      if (q.get('shopify') === 'connected') setConnectStatus('Shopify connected.', 'ok');
+      if (q.get('shopify_error')) setConnectStatus('Could not connect: ' + q.get('shopify_error'), 'err');
+      if (q.has('shopify') || q.has('shopify_error') || org) history.replaceState(null, '', '/shopify');
+
+      window.addEventListener('orgchange', () => { activeResource = 'products'; loadStatus(); });
+    })();
+  </script>
+</body>
+
+</html>

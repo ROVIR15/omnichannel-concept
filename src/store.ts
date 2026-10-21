@@ -301,3 +301,51 @@ export function consumeOutlookOAuthState(state: string): string | null {
   q("DELETE FROM outlook_oauth_states WHERE state = ?").run(state);
   return row && row.expires_at >= Date.now() ? row.org_id : null;
 }
+
+// ---------- Shopify OAuth state -----------------------------------------
+
+export function createShopifyOAuthState(orgId: string, shop: string): string {
+  const state = `${uid()}${uid()}`.replaceAll("-", "");
+  const expiresAt = Date.now() + 10 * 60_000;
+  q("DELETE FROM shopify_oauth_states WHERE expires_at < ?").run(Date.now());
+  q("INSERT INTO shopify_oauth_states (state, org_id, shop, expires_at) VALUES (?, ?, ?, ?)")
+    .run(state, orgId, shop, expiresAt);
+  return state;
+}
+
+export function consumeShopifyOAuthState(state: string): { orgId: string; shop: string } | null {
+  const row = q<{ org_id: string; shop: string; expires_at: number }>(
+    "SELECT org_id, shop, expires_at FROM shopify_oauth_states WHERE state = ?",
+  ).get(state);
+  q("DELETE FROM shopify_oauth_states WHERE state = ?").run(state);
+  return row && row.expires_at >= Date.now() ? { orgId: row.org_id, shop: row.shop } : null;
+}
+
+// ---------- Shopify connection -------------------------------------------
+
+export interface ShopifyConnection {
+  org_id: string; shop_domain: string; access_token: string; scope: string; connected_at: number;
+}
+
+export function shopifyConnection(orgId: string): ShopifyConnection | null {
+  return q<ShopifyConnection>("SELECT * FROM shopify_connections WHERE org_id = ?").get(orgId);
+}
+
+export function upsertShopifyConnection(input: {
+  orgId: string; shopDomain: string; accessToken: string; scope: string;
+}): ShopifyConnection {
+  q(`
+    INSERT INTO shopify_connections (org_id, shop_domain, access_token, scope, connected_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(org_id) DO UPDATE SET
+      shop_domain = excluded.shop_domain,
+      access_token = excluded.access_token,
+      scope = excluded.scope,
+      connected_at = excluded.connected_at
+  `).run(input.orgId, input.shopDomain, input.accessToken, input.scope, Date.now());
+  return shopifyConnection(input.orgId)!;
+}
+
+export function deleteShopifyConnection(orgId: string): void {
+  q("DELETE FROM shopify_connections WHERE org_id = ?").run(orgId);
+}

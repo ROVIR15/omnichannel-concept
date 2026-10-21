@@ -29,6 +29,9 @@ export const APP_SETTING_FIELDS: CredentialField[] = [
   { key: "microsoft_oauth_client_id", label: "Microsoft Application (client) ID", secret: false, help: "Microsoft Entra admin center → App registrations → Overview" },
   { key: "microsoft_oauth_client_secret", label: "Microsoft Client Secret", secret: true, help: "App registrations → Certificates & secrets. Store the secret value, not its ID." },
   { key: "microsoft_oauth_redirect_uri", label: "Microsoft OAuth Redirect URI", secret: false, help: "Must exactly match the Web redirect URI, e.g. http://localhost:12301/api/integrations/outlook/callback" },
+  { key: "shopify_api_key", label: "Shopify API Key", secret: false, help: "Partner Dashboard → App → Client ID" },
+  { key: "shopify_api_secret", label: "Shopify API Secret", secret: true, help: "Partner Dashboard → App → Client secret. Signs the OAuth callback." },
+  { key: "shopify_oauth_redirect_uri", label: "Shopify OAuth Redirect URI", secret: false, help: "Must be listed under the app's Allowed redirection URL(s), e.g. https://your-host/api/integrations/shopify/callback" },
   // WhatsApp totals: "<count>/<seconds>", 0 = unlimited, blank = default.
   // Daily: a plain count per calendar day, blank or 0 = unlimited.
   { key: "whatsapp_inbound_limit", label: "Inbound messages", secret: false, placeholder: WA.whatsapp_inbound_limit, help: `Total WhatsApp messages accepted from customers, across all numbers. Extra messages are dropped. Default ${WA.whatsapp_inbound_limit}.` },
@@ -59,6 +62,9 @@ const ENV_FALLBACK: Record<string, string> = {
   microsoft_oauth_client_id: "MICROSOFT_OAUTH_CLIENT_ID",
   microsoft_oauth_client_secret: "MICROSOFT_OAUTH_CLIENT_SECRET",
   microsoft_oauth_redirect_uri: "MICROSOFT_OAUTH_REDIRECT_URI",
+  shopify_api_key: "SHOPIFY_API_KEY",
+  shopify_api_secret: "SHOPIFY_API_SECRET",
+  shopify_oauth_redirect_uri: "SHOPIFY_OAUTH_REDIRECT_URI",
   whatsapp_inbound_limit: "WHATSAPP_INBOUND_LIMIT",
   whatsapp_outbound_limit: "WHATSAPP_OUTBOUND_LIMIT",
   whatsapp_inbound_daily_limit: "WHATSAPP_INBOUND_DAILY_LIMIT",
