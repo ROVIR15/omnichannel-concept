@@ -91,6 +91,18 @@ export function startTranscription(callbackUrl: string, labels: { inbound: strin
     + ` languageCode="${TRANSCRIPT_LANGUAGE}"/></Start>`;
 }
 
+/** Hands the call to an assistant over a WebSocket (ConversationRelay):
+ *  Twilio turns speech into text and our text into speech. When the session
+ *  ends, Twilio posts to `actionUrl` and runs the TwiML we return there. The
+ *  token is the socket's proof that this call is the one we connected. */
+export function connectRelay(socketUrl: string, actionUrl: string, token: string, greeting: string) {
+  return twiml(`<Connect action="${xml(actionUrl)}"><ConversationRelay url="${xml(socketUrl)}"`
+    + ` welcomeGreeting="${xml(greeting)}" language="${TRANSCRIPT_LANGUAGE}">`
+    + `<Parameter name="token" value="${xml(token)}"/></ConversationRelay></Connect>`);
+}
+
+export const say = (message: string) => `<Say>${xml(message)}</Say>`;
+
 /** GET on the Twilio REST API (2010-04-01), under our account. Null when the
  *  credentials are missing or Twilio says no — callers treat it as "not known yet". */
 export async function twilioGet<T>(path: string): Promise<T | null> {
