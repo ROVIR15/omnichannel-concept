@@ -110,6 +110,23 @@ CREATE TABLE IF NOT EXISTS outlook_oauth_states (
   expires_at  INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS shopify_oauth_states (
+  state       TEXT PRIMARY KEY,
+  org_id      TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+  shop        TEXT NOT NULL,
+  expires_at  INTEGER NOT NULL
+);
+
+-- One Shopify store connected per organisation. The access token Shopify
+-- issues for a custom/OAuth app does not expire on its own.
+CREATE TABLE IF NOT EXISTS shopify_connections (
+  org_id        TEXT PRIMARY KEY REFERENCES organisations(id) ON DELETE CASCADE,
+  shop_domain   TEXT NOT NULL UNIQUE,
+  access_token  TEXT NOT NULL,
+  scope         TEXT NOT NULL,
+  connected_at  INTEGER NOT NULL
+);
+
 -- Rate limiting (src/limits). One row per accepted event; rows older than
 -- the limiter's window are pruned as it runs. Shared by every process on this
 -- database, so the limits hold across restarts and instances.
