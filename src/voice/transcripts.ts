@@ -7,7 +7,7 @@ import { db, voiceDeps, type VoiceUser } from "./context";
 import { twilioGet } from "./twilio";
 
 export type Direction = "inbound" | "outbound";
-export type Speaker = "customer" | "agent";
+export type Speaker = "customer" | "agent" | "assistant";
 type TranscriptStatus = "disabled" | "in-progress" | "completed" | "failed";
 
 /** Twilio's tracks are relative to the leg running our TwiML: the customer on
@@ -16,8 +16,12 @@ export function trackLabels(direction: Direction): { inbound: Speaker; outbound:
   return direction === "inbound" ? { inbound: "customer", outbound: "agent" } : { inbound: "agent", outbound: "customer" };
 }
 
+/** The assistant's lines are stored under their own track (relay.ts). */
+export const ASSISTANT_TRACK = "assistant";
+
 const speakerFor = (direction: Direction, track: string): Speaker =>
-  track === "outbound_track" ? trackLabels(direction).outbound : trackLabels(direction).inbound;
+  track === ASSISTANT_TRACK ? "assistant"
+    : track === "outbound_track" ? trackLabels(direction).outbound : trackLabels(direction).inbound;
 
 interface CallRow {
   call_sid: string;
@@ -33,6 +37,9 @@ interface CallRow {
   language: string | null;
   engine: string | null;
   details: string | null;
+  assistant_handoff: string | null;
+  voicemail_url: string | null;
+  voicemail_sec: number | null;
   created_at: number;
 }
 
@@ -78,6 +85,40 @@ export function recordCall(
   );
 }
 
+/** One finished sentence from an assistant-answered call (relay.ts), stored
+ *  like a Real-Time Transcription segment. */
+export function recordAssistantSegment(callSid: string, speaker: "customer" | "assistant", sequence: number, text: string) {
+  db().query(`
+    INSERT OR IGNORE INTO voice_transcript_segments (call_sid, transcription_sid, track, sequence_id, text, confidence, at)
+    VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+  ).run(callSid, `relay-${callSid}`, speaker === "assistant" ? ASSISTANT_TRACK : "inbound_track", sequence, text, new Date().toISOString());
+}
+
+/** The assistant handed the call to people, with this summary for them. */
+export function recordHandoff(callSid: string, summary: string) {
+  db().query("UPDATE voice_calls SET assistant_handoff = ? WHERE call_sid = ?").run(summary, callSid);
+}
+
+/** The caller left a message (voicemail.ts route). */
+export function recordVoicemail(callSid: string, recordingUrl: string, seconds: number) {
+  db().query("UPDATE voice_calls SET voicemail_url = ?, voicemail_sec = ? WHERE call_sid = ?").run(recordingUrl, seconds, callSid);
+}
+
+/** How the call's wait in line went, if it waited. */
+function waitFor(callSid: string) {
+  const w = db().query<{ outcome: string | null; joined_at: number; left_at: number | null }, [string]>(
+    "SELECT outcome, joined_at, left_at FROM voice_queue_waits WHERE call_sid = ?",
+  ).get(callSid);
+  if (!w) return null;
+  return {
+    outcome: w.outcome ?? "waiting",
+    joinedAt: new Date(w.joined_at).toISOString(),
+    waitSec: Math.round(((w.left_at ?? Date.now()) - w.joined_at) / 1000),
+  };
+}
+
+export const callOrgId = (callSid: string): string | null => getCall(callSid)?.org_id ?? null;
+
 /** One Real-Time Transcription webhook. Only final sentences are stored. */
 export function recordTranscriptionEvent(p: Record<string, string>) {
   const sid = p.CallSid ?? "";
@@ -87,8 +128,10 @@ export function recordTranscriptionEvent(p: Record<string, string>) {
   }
   switch (p.TranscriptionEvent) {
     case "transcription-started":
-      db().query("UPDATE voice_calls SET language = ?, engine = ? WHERE call_sid = ?")
-        .run(p.LanguageCode || null, p.TranscriptionEngine || null, sid);
+      // A call can start several transcriptions (one per ring from the line).
+      db().query(`UPDATE voice_calls SET language = ?, engine = ?,
+        transcript_status = CASE WHEN transcript_status = 'completed' THEN 'in-progress' ELSE transcript_status END
+        WHERE call_sid = ?`).run(p.LanguageCode || null, p.TranscriptionEngine || null, sid);
       break;
     case "transcription-content": {
       if (p.Final !== "true") break;
@@ -197,6 +240,7 @@ export function listCalls(user: VoiceUser, orgId: string | null, limit = 50) {
       transcriptStatus: row.transcript_status === "in-progress" && details ? "completed" : row.transcript_status,
       segments: row.segments,
       preview: row.last_text ?? "",
+      voicemail: row.voicemail_url !== null,
       createdAt: row.created_at,
     }));
 }
@@ -244,6 +288,11 @@ export async function buildCallTranscript(callSid: string) {
       agent: agentId ? { userId: agentId, name: agent?.name ?? null } : null,
       businessNumber: row.business_number,
     },
+    /** Set when an assistant answered first and handed the call to people. */
+    handoff: row.assistant_handoff ? { summary: row.assistant_handoff } : null,
+    /** Set when the caller waited in line (or found it full). */
+    queue: waitFor(row.call_sid),
+    voicemail: row.voicemail_url ? { url: row.voicemail_url, durationSec: row.voicemail_sec } : null,
     transcript: {
       status,
       language: row.language,
