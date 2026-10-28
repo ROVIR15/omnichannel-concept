@@ -16,6 +16,8 @@ Phone calls through Twilio: agents call and answer in the browser, calls are rou
 | `numbers.ts` | Phone numbers per organisation: add, transfer watcher, routing lookups. |
 | `transcripts.ts` | Call records and transcripts. |
 | `relay.ts` | An assistant (e.g. AI) answering calls, through Twilio ConversationRelay. |
+| `queue.ts` | The waiting line: callers wait when everyone is busy, and go to the next free agent. |
+| `queue.test.ts` | The line end to end against a fake Twilio. `bun test src/voice` |
 
 The package imports nothing from the rest of the app. Everything it needs comes in through `initVoice()`, so another project can copy the folder and use it.
 
@@ -101,6 +103,14 @@ In the Twilio Console, point these at your public URL (an ngrok tunnel when loca
 | POST | `/webhooks/twilio/voice` | Starts every call. Browser → dials the number; phone → rings agents. |
 | WS | `/webhooks/twilio/relay` | The assistant's ConversationRelay socket. Checked by one-time token. |
 | POST | `/webhooks/twilio/relay-end` | The assistant finished: ring people or hang up. |
+| POST | `/webhooks/twilio/rang` | Free agents rang; no answer → the line or voicemail. |
+| POST | `/webhooks/twilio/queue/wait` | What a waiting caller hears (place in line, music). |
+| POST | `/webhooks/twilio/queue/left` | The caller left the Twilio queue (hung up, or we took them out). |
+| POST | `/webhooks/twilio/queue/offer` | Ring one agent for a caller from the line. |
+| POST | `/webhooks/twilio/queue/answered` | That agent picked up. |
+| POST | `/webhooks/twilio/queue/offer-end` | That ring ended; not answered → back in line. |
+| POST | `/webhooks/twilio/queue/timeout` | Waited too long → voicemail. |
+| POST | `/webhooks/twilio/voicemail` | The recorded message. |
 | POST | `/webhooks/twilio/transcription` | One transcribed sentence (or start/stop/error). |
 | POST | `/webhooks/twilio/status` | Call status updates (logged). |
 | POST | `/webhooks/twilio/recording` | Recording updates (logged). |
@@ -110,6 +120,7 @@ In the Twilio Console, point these at your public URL (an ngrok tunnel when loca
 | Method | Path | Who | Does |
 |---|---|---|---|
 | GET | `/api/voice/token` | agent+ | Browser calling token for the signed-in user. |
+| GET | `/api/voice/queue?org=` | agent+ | Who is waiting (operators: every line, or `?org=`). |
 | GET | `/api/voice/calls?org=` | agent+ | Recent calls (agents: only their own). |
 | GET | `/api/voice/calls/<CallSid>/transcript` | agent+ | One call's transcript JSON. |
 | GET | `/api/voice/numbers?org=` | admin+ | The organisation's numbers + our Account SID. |
@@ -119,7 +130,13 @@ In the Twilio Console, point these at your public URL (an ngrok tunnel when loca
 
 ## How a call is routed
 
-- **Incoming** (phone → our number): `orgForNumber(To)` finds the organisation, and `availableUserIds(orgId)` gives the agents to ring. Every available agent rings at once; the first to answer gets the call. A number linked to no organisation rings everyone available.
+- **Incoming** (phone → our number): every call goes through `routeCall()` in `routes.ts`. Each step is an add-on, skipped when its option is off:
+  1. **Assistant** (`assistant` option): the AI answers. A handoff continues at step 2.
+  2. **Free agents** ring at once; first to answer wins. Free = `users.available(orgId)`, minus anyone on a call or being rung (asked from Twilio). If people are already waiting, a new caller doesn't jump the line: step 3.
+  3. **The line** (`queue` option): the caller waits. See below.
+  4. **Voicemail.**
+
+  `orgForNumber(To)` finds the organisation. A number linked to no organisation is the platform line and rings everyone available.
 - **Outgoing** (browser → phone): the caller ID is `callerIdFor(agent)`: the agent's organisation number, or else the platform number.
 
 ## An assistant answering calls
@@ -164,6 +181,23 @@ Bun.serve({
 
 **In this app**, `src/call-assistant.ts` is the assistant: one `ai.session()` per call with `transfer_to_agent` and `end_call` tools. Settings → AI provider → *AI Answers Calls*: `off`, `always`, or `when-no-agents`.
 
+## The waiting line
+
+```ts
+initVoice({ …, queue: (orgId) => ({ maxWaitSec: 300, maxSize: 10 }) }); // null for an org = no line
+```
+
+- The caller is put in a Twilio queue (`<Enqueue>`), named `org-<id>` or `platform`. Twilio holds them and asks `/queue/wait` what to play: their place, then hold music.
+- **The order is ours** (`voice_queue_waits`, by join time), not Twilio's. `dispatch(orgId)` takes the longest waiting caller out of the Twilio queue and rings one free agent for them.
+- **Not answered:** the caller goes back in at the same place. That agent isn't offered another caller for 30 seconds.
+- **Waited longer than `maxWaitSec`, or the line has `maxSize` people:** voicemail.
+- **Hung up while waiting:** saved as `abandoned`, a missed call.
+- `dispatch()` runs when someone joins, when a ring ends, and every 5 seconds. Call `voice.queue.dispatch(orgId)` yourself when an agent becomes available, so the next caller rings at once.
+
+The transcript document has `queue` (`outcome`: answered, abandoned, timeout, full; `waitSec`) and `voicemail` (`url`, `durationSec`). Calls in the list have `voicemail: true`.
+
+**Twilio setup:** none. Twilio makes each queue on first use. Real-Time Transcription, if on, starts again on each ring from the line, so hold music isn't transcribed.
+
 ## Using it from other code
 
 `initVoice()` returns the handler plus the main functions:
@@ -184,7 +218,10 @@ await voice.calls.canSee(user, "CA123…");           // → true / false
 voice.twilio.missingSettings();                     // → e.g. ["API Key SID"]
 await voice.twilio.get("/Calls/CA123….json");       // → any Twilio REST GET under the account
 
-voice.stop();                                       // stop the background watcher (tests)
+voice.queue.list("acme");                           // who is waiting, in order
+await voice.queue.dispatch("acme");                 // offer waiting callers to free agents now
+
+voice.stop();                                       // stop background work (tests)
 ```
 
 ## Browser side
@@ -203,7 +240,9 @@ The package serves the API only, not the calling page. The browser:
 - `voice_transcript_segments`: one row per transcribed sentence.
 - `voice_numbers`: organisation phone numbers (`pending` or `active`).
 
-All three are created by `initVoice()` (`schema.ts`).
+- `voice_queue_waits`: one row per caller who waited in line (or found it full), with the outcome.
+
+All are created by `initVoice()` (`schema.ts`).
 
 ## More detail
 

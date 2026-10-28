@@ -28,6 +28,8 @@ const RULES: Rule[] = [
   { method: "GET", path: /^\/(inbox|voice)$/, min: "agent", orgFree: true },
   // Browser calling token for the signed-in user.
   { method: "GET", path: /^\/api\/voice\/token$/, min: "agent", orgFree: true },
+  // Who is waiting in line; the route limits non-operators to their own organisation.
+  { method: "GET", path: /^\/api\/voice\/queue$/, min: "agent", orgFree: true },
   // Calls have no org yet (one platform number); the routes limit agents to their own calls.
   { method: "GET", path: /^\/api\/voice\/calls(\/[^/]+\/transcript)?$/, min: "agent", orgFree: true },
   { method: "GET", path: /^\/(channels|agents)$/, min: "admin", orgFree: true },

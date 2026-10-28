@@ -69,6 +69,14 @@ const voice = initVoice({
     transcription: /^(on|true|yes|1)$/i.test(appSetting("twilio_transcription").trim()),
   }),
   users: { get: getUser, available: availableUserIds },
+  // Callers wait in line when everyone is busy. Same settings for every
+  // organisation for now; blank = the package defaults (5 min, 10 callers).
+  queue: () => {
+    const size = appSetting("twilio_queue_max_size").trim();
+    if (size === "0") return null;
+    const maxWaitSec = Number(appSetting("twilio_queue_max_wait")) || undefined;
+    return { maxWaitSec, maxSize: Number(size) || undefined };
+  },
   // The AI answers calls when Settings → AI Answers Calls says so.
   assistant: callAssistant(ai, availableUserIds),
   contactName: (phone) => sqlite.query<{ display_name: string }, [string]>(
@@ -241,7 +249,11 @@ const server = Bun.serve({
     const { user, token } = auth;
 
     const authRes = await handleAuthRoutes(req, url, user, token);
-    if (authRes) return authRes;
+    if (authRes) {
+      // Someone may have just set themselves available: offer them a waiting caller now.
+      if (path === "/api/auth/me" && method === "PATCH" && authRes.ok && user) void voice.queue.dispatch(user.orgId);
+      return authRes;
+    }
 
     const voiceRes = await voice.handle(req, url, user);
     if (voiceRes) return voiceRes;
