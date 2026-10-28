@@ -77,6 +77,8 @@ const GROUPS = [
     match: k => k.startsWith('google_') },
   { id:'twilio', label:'Twilio', hint:'Voice calls — one subaccount per client organisation',
     match: k => k.startsWith('twilio_') },
+  { id:'ai', label:'AI provider', hint:'Any OpenAI-compatible or Anthropic API, for AI features such as answering calls',
+    match: k => k.startsWith('ai_'), test: true },
   { id:'microsoft', label:'Microsoft', hint:'Outlook OAuth through Microsoft Graph',
     match: k => k.startsWith('microsoft_') },
   // Limits have defaults, so "set" means "customised", not "missing".
@@ -97,6 +99,8 @@ function groupsOf(all) {
 
 async function loadSettings() {
   fields = await api('/api/settings');
+  // Same rule as the server: a link and a model are required.
+  const aiReady = ['ai_base_url', 'ai_model'].every(k => fields.find(f => f.key === k)?.configured);
   $('#groups').innerHTML = groupsOf(fields).map((g, i) => `
     <details class="grp" ${i === 0 ? 'open' : ''}>
       <summary>
@@ -114,9 +118,27 @@ async function loadSettings() {
               'data-key', f.value, f.configured)).join('')}
         </div>
         ${g.usage ? '<div class="usage" id="waUsage" aria-live="polite"></div>' : ''}
+        ${g.test ? `<div class="row" style="gap:10px;margin-top:12px">
+            <button class="ghost small" id="aiTest" ${aiReady ? '' : 'disabled'}>Test connection</button>
+            <span class="help" id="aiTestResult" aria-live="polite">${aiReady
+              ? 'Save first, then test.' : 'Set the AI API Link and AI Model, then save to test.'}</span>
+          </div>` : ''}
       </div>
     </details>`).join('');
   await loadUsage();
+  const testBtn = $('#aiTest');
+  if (testBtn) testBtn.onclick = testAi;
+}
+
+async function testAi() {
+  const out = $('#aiTestResult');
+  out.textContent = 'Sending a test prompt…';
+  try {
+    const r = await jsonPost('/api/ai/test', {});
+    out.textContent = r.ok
+      ? `✓ ${r.model} (${r.protocol}) replied "${r.reply}" in ${r.ms} ms`
+      : `✗ ${r.error}`;
+  } catch (e) { out.textContent = `✗ ${e.message}`; }
 }
 
 // Live usage for the WhatsApp limits, stored in the database (survives restarts).

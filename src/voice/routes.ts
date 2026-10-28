@@ -5,11 +5,12 @@
 
 import { voiceDeps, type VoiceUser } from "./context";
 import { addNumber, callerIdFor, checkPendingNumbers, listNumbers, orgForNumber, removeNumber } from "./numbers";
+import { offerCall, parseOutcome, RELAY_END_PATH, RELAY_PATH } from "./relay";
 import {
-  buildCallTranscript, canSeeCall, listCalls, recordCall, recordTranscriptionEvent, trackLabels, type Direction,
+  buildCallTranscript, callOrgId, canSeeCall, listCalls, recordCall, recordTranscriptionEvent, trackLabels, type Direction,
 } from "./transcripts";
 import {
-  dialClients, dialNumber, missingForCalls, sayError, startTranscription, transcriptionEnabled, twiml,
+  connectRelay, dialClients, dialNumber, missingForCalls, say, sayError, startTranscription, transcriptionEnabled, twiml,
   validTwilioSignature, voiceConfig, voiceToken,
 } from "./twilio";
 
@@ -38,7 +39,10 @@ function beginCall(
 ): string {
   const transcribe = transcriptionEnabled();
   recordCall(p, direction, { ...call, transcribing: transcribe });
-  if (!transcribe) return "";
+  return transcribe ? transcriptionStart(req, url, direction) : "";
+}
+
+function transcriptionStart(req: Request, url: URL, direction: Direction): string {
   const callback = new URL("/webhooks/twilio/transcription", publicUrl(req, url)).href;
   return startTranscription(callback, trackLabels(direction));
 }
@@ -76,12 +80,40 @@ export async function handleVoiceRoutes(req: Request, url: URL, user: VoiceUser 
       return dialNumber(to, callerId, beginCall(req, url, p, "outbound", { orgId: agent?.orgId ?? null, businessNumber: callerId }));
     }
 
-    // From a phone to one of our numbers: ring the browsers of that number's
-    // organisation (everyone, for the platform number).
+    // From a phone to one of our numbers: the assistant answers if it wants
+    // to; otherwise ring the browsers of that number's organisation
+    // (everyone, for the platform number).
     const orgId = orgForNumber(p.To ?? "");
     const ring = voiceDeps().users.available(orgId);
+    const offer = offerCall({
+      callSid: p.CallSid ?? "", orgId, from: p.From ?? "", to: p.To ?? "",
+      callerName: voiceDeps().contactName?.(p.From ?? "") ?? (p.CallerName || null),
+      agentsAvailable: ring.length,
+    });
+    if (offer) {
+      console.log(`[voice] inbound ${p.From} → ${p.To} (${p.CallSid}) org ${orgId ?? "platform"}, assistant answering`);
+      // The assistant's lines are the transcript, so it is always "transcribing".
+      recordCall(p, "inbound", { orgId, businessNumber: p.To ?? "", transcribing: true });
+      const base = publicUrl(req, url);
+      const socket = new URL(RELAY_PATH, base);
+      socket.protocol = socket.protocol === "http:" ? "ws:" : "wss:";
+      return connectRelay(socket.href, new URL(RELAY_END_PATH, base).href, offer.token, offer.greeting);
+    }
     console.log(`[voice] inbound ${p.From} → ${p.To} (${p.CallSid}) org ${orgId ?? "platform"}, ringing ${ring.length} agent(s)`);
     return dialClients(ring, 25, ring.length ? beginCall(req, url, p, "inbound", { orgId, businessNumber: p.To ?? "" }) : "");
+  }
+
+  // The assistant's session is over. Hang up if it said so; otherwise
+  // (handoff, or the relay failed) ring people.
+  if (path === RELAY_END_PATH && method === "POST") {
+    const p = await twilioParams(req, url);
+    if (!p) return new Response("invalid signature", { status: 403 });
+    const outcome = parseOutcome(p.HandoffData);
+    console.log(`[voice] relay ended ${p.CallSid} (${p.SessionStatus ?? "?"}) → ${outcome?.action ?? "no outcome, ringing people"}`);
+    if (outcome?.action === "hangup") return twiml(`${say("Thank you for calling. Goodbye.")}<Hangup/>`);
+    const ring = voiceDeps().users.available(callOrgId(p.CallSid ?? ""));
+    const before = ring.length ? say("One moment, I'm connecting you to a colleague.") + (transcriptionEnabled() ? transcriptionStart(req, url, "inbound") : "") : "";
+    return dialClients(ring, 25, before);
   }
 
   if (path === "/webhooks/twilio/transcription" && method === "POST") {

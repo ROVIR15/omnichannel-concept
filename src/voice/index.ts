@@ -6,11 +6,15 @@
 import { setVoiceDeps, type VoiceOptions } from "./context";
 import { addNumber, callerIdFor, checkPendingNumbers, listNumbers, orgForNumber, removeNumber, startNumberWatcher } from "./numbers";
 import { handleVoiceRoutes } from "./routes";
+import { relayWebsocket, upgradeRelay } from "./relay";
 import { ensureVoiceSchema } from "./schema";
 import { buildCallTranscript, canSeeCall, listCalls } from "./transcripts";
 import { missingForCalls, twilioGet, twilioPost } from "./twilio";
 
-export type { VoiceOptions, VoiceRole, VoiceSettings, VoiceUser } from "./context";
+export type {
+  VoiceAssistant, VoiceAssistantAction, VoiceAssistantCall, VoiceAssistantCallInfo, VoiceOptions, VoiceRole, VoiceSettings, VoiceUser,
+} from "./context";
+export type { RelaySocketData } from "./relay";
 export type { NumberStatus, VoiceNumber } from "./numbers";
 
 export function initVoice(options: VoiceOptions) {
@@ -22,6 +26,10 @@ export function initVoice(options: VoiceOptions) {
     /** Serves every voice route; null when the request isn't one of them.
      *  `user` = the signed-in person, or null (webhooks need none). */
     handle: handleVoiceRoutes,
+
+    /** The assistant's socket (ConversationRelay). Pass `websocket` to
+     *  Bun.serve and call `upgrade()` first thing in fetch. */
+    relay: { upgrade: upgradeRelay, websocket: relayWebsocket },
 
     numbers: { add: addNumber, remove: removeNumber, list: listNumbers, checkPending: checkPendingNumbers, orgFor: orgForNumber, callerIdFor },
     calls: { list: listCalls, transcript: buildCallTranscript, canSee: canSeeCall },
