@@ -32,6 +32,18 @@ import {
   syncOutlookInbox,
 } from "./integrations/outlook";
 import {
+  completeShopifyOAuth,
+  disconnectShopify,
+  listShopifyContent,
+  listShopifyCustomers,
+  listShopifyInventory,
+  listShopifyOrders,
+  listShopifyPolicies,
+  listShopifyProducts,
+  shopifyConnectionStatus,
+  shopifyConnectUrl,
+} from "./integrations/shopify";
+import {
   accountByExternal, createOrg, deleteAccount, deleteOrg, getAccount, listAccounts,
   listOrgs, renameOrg, upsertAccount, consumeGmailOAuthState, consumeOutlookOAuthState,
 } from "./store";
@@ -233,6 +245,7 @@ const server = Bun.serve({
     if (path === "/voice") return page("voice.html");
     if (path === "/inbox") return page("inbox.html");
     if (path === "/permissions") return page("permissions.html");
+    if (path === "/shopify") return page("shopify.html");
     if (path === "/web/shell.css") return asset("shell.css");
     if (path === "/web/shell.js") return asset("shell.js");
 
@@ -526,6 +539,75 @@ const server = Bun.serve({
         attachments: b.attachments,
       });
       return json(result, result.ok ? 201 : 400);
+    }
+
+    // --- Shopify integration ----------------------------------------------
+    if (path === "/api/integrations/shopify/status" && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      return json(shopifyConnectionStatus(orgId));
+    }
+
+    if (path === "/api/integrations/shopify/connect" && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      const shop = url.searchParams.get("shop");
+      if (!orgId || !shop) return json({ error: "org and shop query parameters are required" }, 400);
+      try {
+        return Response.redirect(shopifyConnectUrl(orgId, shop), 302);
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "could not start Shopify OAuth" }, 400);
+      }
+    }
+
+    if (path === "/api/integrations/shopify/callback" && method === "GET") {
+      const destination = new URL("/shopify", url.origin);
+      const oauthError = url.searchParams.get("error");
+      if (oauthError) {
+        destination.searchParams.set("shopify_error", oauthError);
+        return Response.redirect(destination, 302);
+      }
+      try {
+        const r = await completeShopifyOAuth(url.searchParams.get("state") ?? "", url.searchParams);
+        destination.searchParams.set("org", r.orgId);
+        destination.searchParams.set("shopify", "connected");
+      } catch (error: unknown) {
+        destination.searchParams.set(
+          "shopify_error",
+          error instanceof Error ? error.message : "Shopify connection failed",
+        );
+      }
+      return Response.redirect(destination, 302);
+    }
+
+    if (path === "/api/integrations/shopify/disconnect" && method === "POST") {
+      const b = await body<{ orgId?: string }>(req);
+      if (!b?.orgId) return json({ error: "orgId is required" }, 400);
+      try {
+        disconnectShopify(b.orgId);
+        return json({ ok: true });
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "Shopify disconnect failed" }, 400);
+      }
+    }
+
+    const SHOPIFY_RESOURCES: Record<string, (orgId: string) => Promise<unknown>> = {
+      products: listShopifyProducts,
+      inventory: listShopifyInventory,
+      orders: listShopifyOrders,
+      customers: listShopifyCustomers,
+      content: listShopifyContent,
+      policies: listShopifyPolicies,
+    };
+    const shopifyResourceMatch = path.match(/^\/api\/integrations\/shopify\/(products|inventory|orders|customers|content|policies)$/);
+    if (shopifyResourceMatch && method === "GET") {
+      const orgId = url.searchParams.get("org");
+      if (!orgId) return json({ error: "org query parameter is required" }, 400);
+      try {
+        const items = await SHOPIFY_RESOURCES[shopifyResourceMatch[1]!]!(orgId);
+        return json({ items });
+      } catch (error: unknown) {
+        return json({ error: error instanceof Error ? error.message : "Shopify request failed" }, 502);
+      }
     }
 
     // --- Channel accounts ------------------------------------------------
