@@ -14,6 +14,14 @@ import {
 import { seedIfEmpty } from "./seed";
 import { invalidLimitSetting } from "./limits";
 import { throttleInbound, whatsappUsage } from "./whatsapp";
+import { sendWhatsAppText } from "./whatsapp/cloud-api";
+import {
+  appendPlaygroundMessage, newPlaygroundSession, playgroundSession, setPlaygroundCredentials,
+} from "./whatsapp/playground-store";
+import {
+  receiveWhatsAppPlaygroundWebhook, verifyWhatsAppPlaygroundWebhook,
+  whatsappPlaygroundWebhookSettings,
+} from "./whatsapp/playground-webhook";
 import { APP_SETTING_FIELDS, appSetting, maskedAppSettings, saveAppSettings } from "./settings";
 import {
   completeGmailOAuth,
@@ -86,6 +94,28 @@ const page = (file: string) =>
   new Response(Bun.file(new URL(`./web/${file}`, import.meta.url)), {
     headers: { "content-type": "text/html" },
   });
+
+const PLAYGROUND_COOKIE = "wa_playground";
+
+function cookieValue(req: Request, name: string) {
+  for (const part of (req.headers.get("cookie") ?? "").split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(value.join("="));
+  }
+  return undefined;
+}
+
+function playgroundPage(req: Request) {
+  const existingId = cookieValue(req, PLAYGROUND_COOKIE);
+  const sessionId = playgroundSession(existingId) ? existingId! : newPlaygroundSession();
+  return new Response(Bun.file(new URL("./web/whatsapp-playground.html", import.meta.url)), {
+    headers: {
+      "content-type": "text/html",
+      "set-cookie": `${PLAYGROUND_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Strict`,
+      "cache-control": "no-store",
+    },
+  });
+}
 
 /** Shared header/helpers the console pages pull in, so the three stay in sync. */
 const asset = (file: string) => {
@@ -182,7 +212,7 @@ async function handleWebhook(channel: ChannelType, req: Request, url: URL) {
   if (!connector.verifyWebhook(wreq, account ?? undefined)) {
     // Say enough to diagnose which key Meta actually signed with.
     let object = "?";
-    try { object = JSON.parse(wreq.rawBody).object ?? "?"; } catch {}
+    try { object = JSON.parse(wreq.rawBody).object ?? "?"; } catch { }
     console.warn(
       `[${channel}] signature rejected — object=${object}` +
       ` externalId=${first?.accountExternalId ?? "?"}` +
@@ -208,7 +238,7 @@ async function handleWebhook(channel: ChannelType, req: Request, url: URL) {
         }
         for (const c of e.changes ?? []) kinds.push(`change:${c.field}`);
       }
-    } catch {}
+    } catch { }
     console.log(`[${channel}] no messages in delivery — event types: ${kinds.join(", ") || "(none)"}`);
     return new Response("EVENT_RECEIVED", { status: 200 });
   }
@@ -246,6 +276,7 @@ const server = Bun.serve({
     if (path === "/inbox") return page("inbox.html");
     if (path === "/permissions") return page("permissions.html");
     if (path === "/shopify") return page("shopify.html");
+    if (path === "/whatsapp-playground") return playgroundPage(req);
     if (path === "/web/shell.css") return asset("shell.css");
     if (path === "/web/shell.js") return asset("shell.js");
 
@@ -253,8 +284,79 @@ const server = Bun.serve({
     // One Meta endpoint serves Messenger, Instagram and WhatsApp; the parser
     // branches on payload.object.
     if (path === "/webhooks/meta") return handleWebhook("messenger", req, url);
+    if (path === "/webhooks/whatsapp-playground" && method === "GET") {
+      return verifyWhatsAppPlaygroundWebhook(url);
+    }
+    if (path === "/webhooks/whatsapp-playground" && method === "POST") {
+      return receiveWhatsAppPlaygroundWebhook(
+        await req.text(),
+        req.headers.get("x-hub-signature-256"),
+      );
+    }
     if (path === "/webhooks/line") return handleWebhook("line", req, url);
     if (path === "/webhooks/email") return handleWebhook("email", req, url);
+
+    // --- Manual WhatsApp playground -------------------------------------
+    const playgroundId = cookieValue(req, PLAYGROUND_COOKIE);
+    const playground = playgroundSession(playgroundId);
+
+    if (path === "/api/whatsapp-playground/config" && method === "GET") {
+      if (!playground) return json({ error: "Open /whatsapp-playground to start a session" }, 401);
+      return json({
+        wabaId: playground.credentials?.wabaId ?? "",
+        phoneNumberId: playground.credentials?.phoneNumberId ?? "",
+        accessTokenConfigured: Boolean(playground.credentials?.accessToken),
+        webhookUrl: `${url.origin}/webhooks/whatsapp-playground`,
+        ...whatsappPlaygroundWebhookSettings(),
+      });
+    }
+
+    if (path === "/api/whatsapp-playground/config" && method === "POST") {
+      if (!playground || !playgroundId) return json({ error: "Playground session expired; reload the page" }, 401);
+      const b = await body<{ wabaId?: string; phoneNumberId?: string; accessToken?: string }>(req);
+      const accessToken = b?.accessToken?.trim() || playground.credentials?.accessToken;
+      if (!b?.wabaId?.trim() || !b.phoneNumberId?.trim() || !accessToken) {
+        return json({ error: "WABA ID, Phone Number ID, and Access Token are required" }, 400);
+      }
+      setPlaygroundCredentials(playgroundId, {
+        wabaId: b.wabaId.trim(),
+        phoneNumberId: b.phoneNumberId.trim(),
+        accessToken,
+      });
+      return json({ ok: true, accessTokenConfigured: true });
+    }
+
+    if (path === "/api/whatsapp-playground/messages" && method === "GET") {
+      if (!playground) return json({ error: "Playground session expired; reload the page" }, 401);
+      return json({ messages: playground.messages });
+    }
+
+    if (path === "/api/whatsapp-playground/send" && method === "POST") {
+      if (!playground?.credentials || !playgroundId) {
+        return json({ error: "Save WhatsApp credentials first" }, 400);
+      }
+      const b = await body<{ to?: string; text?: string }>(req);
+      const recipient = (b?.to ?? "").replace(/[+\s().-]/g, "");
+      const messageText = b?.text?.trim() ?? "";
+      if (!/^\d{7,15}$/.test(recipient)) {
+        return json({ error: "Enter a recipient phone number in international format" }, 400);
+      }
+      if (!messageText) return json({ error: "Message text is required" }, 400);
+      if (messageText.length > 4096) return json({ error: "Message text must be 4,096 characters or fewer" }, 400);
+
+      const result = await sendWhatsAppText(playground.credentials, recipient, messageText);
+      if (!result.ok) return json({ error: result.error, response: result.response }, result.status || 502);
+
+      appendPlaygroundMessage(playgroundId, {
+        id: result.messageId || crypto.randomUUID(),
+        direction: "sent",
+        text: messageText,
+        sender: playground.credentials.phoneNumberId,
+        recipient,
+        timestamp: Date.now(),
+      });
+      return json({ ok: true, messageId: result.messageId, response: result.response }, 201);
+    }
 
     // --- Organisations --------------------------------------------------
     if (path === "/api/orgs" && method === "GET") {
@@ -520,7 +622,7 @@ const server = Bun.serve({
         bodyText?: string; attachments?: Attachment[];
       }>(req);
       if (!b?.orgId || !b.accountId || !b.to?.trim() || !b.subject?.trim()
-          || (!b.bodyText?.trim() && !b.attachments?.length)) {
+        || (!b.bodyText?.trim() && !b.attachments?.length)) {
         return json({ error: "orgId, accountId, to, subject, and a message or attachment are required" }, 400);
       }
       const account = getAccount(b.accountId);
@@ -528,7 +630,7 @@ const server = Bun.serve({
         return json({ error: "email account not found for this organisation" }, 404);
       }
       if (!["gmail", "outlook"].includes(account.credentials.provider)
-          || !(account.credentials.refreshToken || account.credentials.accessToken)) {
+        || !(account.credentials.refreshToken || account.credentials.accessToken)) {
         return json({ error: "selected email account is not connected" }, 400);
       }
       const result = await startConversation({

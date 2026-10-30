@@ -9,19 +9,20 @@
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Setup lives on Channels and Settings; Inbox is the day-to-day page.
 // `min` mirrors the server's rules (src/auth/access.ts) — hiding a link is
 // for tidiness only; the server is what actually refuses.
 const NAV = [
-  { href: '/channels',    label: 'Channels',    min: 'admin' },
-  { href: '/inbox',       label: 'Inbox',       min: 'agent' },
-  { href: '/voice',       label: 'Voice',       min: 'agent' },
-  { href: '/agents',      label: 'Agents',      min: 'admin' },
-  { href: '/shopify',     label: 'Shopify',     min: 'admin' },
+  { href: '/channels', label: 'Channels', min: 'admin' },
+  { href: '/inbox', label: 'Inbox', min: 'agent' },
+  { href: '/voice', label: 'Voice', min: 'agent' },
+  { href: '/agents', label: 'Agents', min: 'admin' },
+  { href: '/shopify', label: 'Shopify', min: 'admin' },
+  { href: '/whatsapp-playground', label: 'WhatsApp Lab' },
   { href: '/permissions', label: 'Permissions', min: 'operator' },
-  { href: '/',            label: 'Settings',    min: 'operator' },
+  { href: '/', label: 'Settings', min: 'operator' },
 ];
 const RANK = { agent: 0, admin: 1, operator: 2 };
 const PRESENCE = ['available', 'busy', 'away'];
@@ -140,7 +141,7 @@ async function mountShell({ active, manageOrgs = false, actions = '' } = {}) {
     } catch (err) { toast(err.message); }
   };
   $('#signOut').onclick = async () => {
-    await jsonPost('/api/auth/logout', {}).catch(() => {});
+    await jsonPost('/api/auth/logout', {}).catch(() => { });
     location.href = '/login';
   };
 

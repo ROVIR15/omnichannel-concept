@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WhatsApp Cloud API Playground</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink:#13241d; --muted:#68776f; --line:#dbe5df; --paper:#f5f8f6;
+    --card:#fff; --green:#167a4b; --green-dark:#0d5e38; --mint:#dff5e9;
+    --incoming:#fff; --danger:#b42318; --shadow:0 16px 45px #183d2b12;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:14px/1.5 Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  button,input,textarea { font:inherit; }
+  button { cursor:pointer; }
+  .topbar { min-height:64px; display:flex; align-items:center; gap:14px; padding:0 28px; background:#102d22; color:#fff; }
+  .mark { width:34px; height:34px; border-radius:50%; display:grid; place-items:center; background:#25d366; font-size:17px; font-weight:800; }
+  .title { font-size:15px; font-weight:720; letter-spacing:-.01em; }
+  .topbar a { margin-left:auto; color:#cfe5da; text-decoration:none; font-size:13px; }
+  .topbar a:hover { color:#fff; }
+  main { max-width:1180px; margin:0 auto; padding:32px 24px 56px; }
+  .intro { display:flex; justify-content:space-between; align-items:flex-end; gap:24px; margin-bottom:24px; }
+  h1 { margin:0 0 6px; font-size:28px; letter-spacing:-.035em; line-height:1.15; }
+  .intro p { margin:0; color:var(--muted); max-width:650px; }
+  .session { color:var(--green); background:var(--mint); padding:6px 10px; border-radius:999px; white-space:nowrap; font-size:12px; font-weight:650; }
+  .layout { display:grid; grid-template-columns:360px minmax(0,1fr); gap:20px; align-items:start; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:15px; box-shadow:var(--shadow); }
+  .panel { padding:20px; }
+  h2 { margin:0 0 4px; font-size:16px; }
+  .lede { color:var(--muted); font-size:12px; margin:0 0 18px; }
+  label { display:block; margin:0 0 13px; color:var(--muted); font-size:12px; font-weight:650; }
+  input,textarea { width:100%; margin-top:5px; padding:10px 11px; color:var(--ink); background:#fff; border:1px solid #cbd8d1; border-radius:9px; outline:none; }
+  input:focus,textarea:focus { border-color:var(--green); box-shadow:0 0 0 3px #167a4b18; }
+  button.primary { width:100%; border:0; border-radius:9px; padding:10px 14px; background:var(--green); color:#fff; font-weight:700; }
+  button.primary:hover { background:var(--green-dark); }
+  button:disabled { opacity:.55; cursor:wait; }
+  .notice { display:none; margin-top:12px; padding:9px 11px; border-radius:8px; font-size:12px; overflow-wrap:anywhere; }
+  .notice.show { display:block; }
+  .notice.ok { color:#086237; background:#e2f7eb; }
+  .notice.error { color:var(--danger); background:#fff0ee; }
+  .webhook { margin-top:18px; border-top:1px solid var(--line); padding-top:17px; }
+  .webhook h3 { margin:0 0 9px; font-size:13px; }
+  .endpoint { display:flex; gap:7px; }
+  code { min-width:0; flex:1; padding:8px 9px; border-radius:8px; background:#f0f4f2; font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
+  .copy { border:1px solid var(--line); border-radius:8px; color:var(--ink); background:#fff; padding:7px 10px; }
+  .check { margin-top:9px; color:var(--muted); font-size:11px; }
+  .check strong { color:var(--green); }
+  .check .missing { color:var(--danger); }
+  .chat { min-height:680px; display:flex; flex-direction:column; overflow:hidden; }
+  .chat-head { padding:17px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+  .chat-head h2 { margin:0; }
+  .live { color:var(--muted); font-size:11px; }
+  .live::before { content:""; display:inline-block; width:7px; height:7px; margin-right:6px; border-radius:50%; background:#25b867; }
+  .messages { flex:1; min-height:360px; max-height:520px; overflow:auto; padding:24px; background-color:#edf3ef; background-image:radial-gradient(#173f2b0d 1px,transparent 1px); background-size:17px 17px; }
+  .empty { height:100%; min-height:300px; display:grid; place-items:center; color:var(--muted); text-align:center; }
+  .empty span { max-width:300px; }
+  .message { max-width:74%; margin:0 0 13px; padding:10px 12px 8px; border:1px solid #dfe7e2; border-radius:11px; background:var(--incoming); box-shadow:0 4px 12px #173d2a0b; }
+  .message.sent { margin-left:auto; background:#d9f8e6; border-color:#c6ecd6; }
+  .party { color:var(--green-dark); font-size:10px; font-weight:750; margin-bottom:3px; overflow-wrap:anywhere; }
+  .text { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .time { margin-top:4px; color:var(--muted); font-size:10px; text-align:right; }
+  .composer { padding:17px 20px 19px; border-top:1px solid var(--line); }
+  .compose-grid { display:grid; grid-template-columns:210px minmax(0,1fr) 90px; gap:9px; align-items:end; }
+  .composer label { margin:0; }
+  .composer textarea { min-height:42px; max-height:120px; resize:vertical; }
+  .composer button { height:42px; }
+  .result-detail { margin-top:7px; font:10px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; }
+  @media (max-width:800px) {
+    main { padding:22px 14px 40px; } .layout { grid-template-columns:1fr; }
+    .intro { align-items:flex-start; flex-direction:column; } .chat { min-height:620px; }
+    .compose-grid { grid-template-columns:1fr; } .composer button { width:100%; }
+  }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="mark">W</div>
+    <div class="title">WhatsApp Cloud API Playground</div>
+    <a href="/channels">Back to Omnichannel</a>
+  </header>
+
+  <main>
+    <div class="intro">
+      <div>
+        <h1>Send and receive, without onboarding.</h1>
+        <p>Paste one WhatsApp Business account’s credentials, register the webhook below in Meta, and use this page as a live manual test bench.</p>
+      </div>
+      <span class="session">In-memory session</span>
+    </div>
+
+    <div class="layout">
+      <aside class="card panel">
+        <h2>Connection</h2>
+        <p class="lede">Kept only in this server process. The access token is never returned to the browser after saving.</p>
+        <form id="configForm">
+          <label>WABA ID<input id="wabaId" autocomplete="off" required /></label>
+          <label>Phone Number ID<input id="phoneNumberId" autocomplete="off" required /></label>
+          <label>Access Token<input id="accessToken" type="password" autocomplete="off" required /></label>
+          <button class="primary" id="saveConfig">Save credentials</button>
+        </form>
+        <div class="notice" id="configNotice"></div>
+
+        <div class="webhook">
+          <h3>Meta webhook configuration</h3>
+          <div class="endpoint"><code id="webhookUrl">Loading…</code><button class="copy" id="copyWebhook" type="button">Copy</button></div>
+          <div class="check" id="verifyStatus"></div>
+          <div class="check" id="signatureStatus"></div>
+          <p class="lede" style="margin:10px 0 0">Subscribe the WhatsApp Business Account to the <strong>messages</strong> field. Set the same verify token in Meta and <code style="display:inline;padding:1px 4px">WHATSAPP_WEBHOOK_VERIFY_TOKEN</code>.</p>
+        </div>
+      </aside>
+
+      <section class="card chat">
+        <div class="chat-head"><h2>Messages</h2><span class="live">Polling for webhooks</span></div>
+        <div class="messages" id="messages"><div class="empty"><span>No messages yet. Save credentials, send a message, or message your WhatsApp business number.</span></div></div>
+        <form class="composer" id="sendForm">
+          <div class="compose-grid">
+            <label>Recipient<input id="recipient" inputmode="tel" placeholder="628123456789" required /></label>
+            <label>Message<textarea id="messageText" maxlength="4096" placeholder="Type a test message…" required></textarea></label>
+            <button class="primary" id="sendButton">Send</button>
+          </div>
+          <div class="notice" id="sendNotice"></div>
+        </form>
+      </section>
+    </div>
+  </main>
+
+<script>
+const $ = (selector) => document.querySelector(selector);
+const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let lastMessageSignature = '';
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `HTTP ${response.status}`);
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
+function notice(element, text, kind, detail) {
+  element.className = `notice show ${kind}`;
+  element.innerHTML = `<div>${esc(text)}</div>${detail ? `<div class="result-detail">${esc(detail)}</div>` : ''}`;
+}
+
+async function loadConfig() {
+  const config = await api('/api/whatsapp-playground/config');
+  $('#wabaId').value = config.wabaId;
+  $('#phoneNumberId').value = config.phoneNumberId;
+  $('#accessToken').placeholder = config.accessTokenConfigured ? 'Saved for this session — paste to replace' : '';
+  $('#accessToken').required = !config.accessTokenConfigured;
+  $('#webhookUrl').textContent = config.webhookUrl;
+  $('#verifyStatus').innerHTML = config.verifyTokenConfigured
+    ? '<strong>✓ Verify token configured</strong>'
+    : '<span class="missing">✕ Set WHATSAPP_WEBHOOK_VERIFY_TOKEN and restart</span>';
+  $('#signatureStatus').innerHTML = config.signatureValidationConfigured
+    ? '<strong>✓ Webhook signature validation enabled</strong>'
+    : 'Optional: set WHATSAPP_APP_SECRET to validate webhook signatures.';
+}
+
+$('#configForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = $('#saveConfig');
+  button.disabled = true; button.textContent = 'Saving…';
+  try {
+    await api('/api/whatsapp-playground/config', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body:JSON.stringify({ wabaId:$('#wabaId').value, phoneNumberId:$('#phoneNumberId').value, accessToken:$('#accessToken').value }),
+    });
+    $('#accessToken').value = '';
+    notice($('#configNotice'), 'Credentials saved in server memory.', 'ok');
+    await loadConfig();
+  } catch (error) {
+    notice($('#configNotice'), error.message, 'error');
+  } finally { button.disabled = false; button.textContent = 'Save credentials'; }
+});
+
+$('#copyWebhook').addEventListener('click', async () => {
+  await navigator.clipboard.writeText($('#webhookUrl').textContent);
+  $('#copyWebhook').textContent = 'Copied';
+  setTimeout(() => $('#copyWebhook').textContent = 'Copy', 1200);
+});
+
+function renderMessages(items) {
+  const signature = items.map((item) => item.id).join('|');
+  if (signature === lastMessageSignature) return;
+  lastMessageSignature = signature;
+  const list = $('#messages');
+  if (!items.length) {
+    list.innerHTML = '<div class="empty"><span>No messages yet. Save credentials, send a message, or message your WhatsApp business number.</span></div>';
+    return;
+  }
+  list.innerHTML = items.map((item) => `
+    <article class="message ${item.direction === 'sent' ? 'sent' : ''}">
+      <div class="party">${item.direction === 'sent' ? 'To' : 'From'}: ${esc(item.direction === 'sent' ? item.recipient : item.sender)}</div>
+      <div class="text">${esc(item.text)}</div>
+      <div class="time">${new Date(item.timestamp).toLocaleString()}</div>
+    </article>`).join('');
+  list.scrollTop = list.scrollHeight;
+}
+
+async function loadMessages() {
+  try { renderMessages((await api('/api/whatsapp-playground/messages')).messages); } catch (error) {
+    if (error.message.includes('expired')) location.reload();
+  }
+}
+
+$('#sendForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = $('#sendButton');
+  button.disabled = true; button.textContent = 'Sending…';
+  try {
+    const result = await api('/api/whatsapp-playground/send', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body:JSON.stringify({ to:$('#recipient').value, text:$('#messageText').value }),
+    });
+    $('#messageText').value = '';
+    notice($('#sendNotice'), `Sent${result.messageId ? ` · ${result.messageId}` : ''}`, 'ok', JSON.stringify(result.response, null, 2));
+    await loadMessages();
+  } catch (error) {
+    notice($('#sendNotice'), error.message, 'error', error.payload?.response ? JSON.stringify(error.payload.response, null, 2) : '');
+  } finally { button.disabled = false; button.textContent = 'Send'; }
+});
+
+$('#messageText').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#sendForm').requestSubmit(); }
+});
+
+loadConfig().catch((error) => notice($('#configNotice'), error.message, 'error'));
+loadMessages();
+setInterval(loadMessages, 2000);
+</script>
+</body>
+</html>

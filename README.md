@@ -19,8 +19,35 @@ Three pages, split by who is doing the work:
 - **Channels** → `http://localhost:12301/channels` — what each *client* connects, one channel at a time
 - **Inbox** → `http://localhost:12301/inbox` — conversations, replies, new outbound threads
 
+There is also an isolated **WhatsApp Cloud API Playground** at
+`http://localhost:12301/whatsapp-playground` for manual credentials and
+session-only send/receive testing.
+
 No credentials needed to try it. Channels seed as `pending` with dev ids, and a
 signature check is skipped whenever that channel's secret is unset.
+
+## WhatsApp Cloud API manual playground
+
+The playground is intentionally separate from the database-backed omnichannel
+demo. WABA ID, Phone Number ID, access token, and up to 200 messages live only
+in server memory for the browser session; restarting the server clears them.
+The access token is submitted to the server for Graph API calls and is never
+returned by an API response.
+
+1. Set `WHATSAPP_WEBHOOK_VERIFY_TOKEN` in `.env` to a value you choose. Set
+   `WHATSAPP_APP_SECRET` as well if you want incoming webhook signature
+   validation, then restart the app.
+2. Run `make dev` and open `http://localhost:12301/whatsapp-playground`.
+3. Save the WABA ID, Phone Number ID, and access token from Meta's WhatsApp API
+   Setup page.
+4. Run `make tunnel`, copy the playground's public webhook URL into Meta, use
+   the same verify token from step 1, and subscribe the WABA to `messages`.
+5. Send from the composer or message the connected business number. The page
+   polls its in-memory inbox every two seconds.
+
+The send client calls `POST /{PHONE_NUMBER_ID}/messages`. Set
+`WHATSAPP_GRAPH_API_VERSION` to override the Graph version for this playground;
+otherwise it uses `META_GRAPH_VERSION`, then the project's current default.
 
 ## Targets
 
@@ -190,6 +217,11 @@ the stored one untouched.
 |---|---|
 | `GET /` | console |
 | `GET /inbox` | agent inbox |
+| `GET /whatsapp-playground` | manual WhatsApp Cloud API playground |
+| `GET/POST /webhooks/whatsapp-playground` | playground verification and incoming messages |
+| `GET/POST /api/whatsapp-playground/config` | session-only manual credentials |
+| `GET /api/whatsapp-playground/messages` | session-only playground messages |
+| `POST /api/whatsapp-playground/send` | send a WhatsApp text message |
 | `GET/POST /webhooks/meta` | Messenger, Instagram, WhatsApp (branches on `payload.object`) |
 | `POST /webhooks/line` | LINE |
 | `POST /webhooks/email` | inbound email from Postmark/SendGrid/SES |
