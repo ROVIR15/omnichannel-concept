@@ -21,6 +21,8 @@
   .incoming.show { display:block; }
   .call-btns { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
   button.hangup { background:var(--bad); }
+  .queue-row { display:flex; justify-content:space-between; gap:12px; padding:6px 0; border-bottom:1px solid var(--line, rgba(127,127,127,.2)); }
+  .queue-row:last-child { border-bottom:0; }
   #log { font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); max-height:220px; overflow:auto; white-space:pre-wrap; }
 </style>
 </head>
@@ -32,6 +34,11 @@
       <div class="state" id="state">Connecting…</div>
       <div class="sub" id="numberLine" style="margin-top:4px"></div>
     </div>
+  </section>
+
+  <section>
+    <h2>Waiting in line</h2>
+    <div class="card" id="queue" aria-live="polite"><span class="sub">No one is waiting.</span></div>
   </section>
 
   <section class="card incoming" id="incoming" aria-live="assertive">
@@ -204,8 +211,24 @@ $('#mute').onclick = () => {
   $('#mute').textContent = muted ? 'Unmute' : 'Mute';
 };
 
+// Who is waiting (Q-06). The next caller rings the first free agent by
+// itself; this list is only so agents see how busy it is.
+const mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+async function loadQueue() {
+  let rows;
+  try { rows = await api('/api/voice/queue'); } catch { return; }
+  $('#queue').innerHTML = rows.length
+    ? rows.map(r => `<div class="queue-row">
+        <span>${r.position}. ${esc(r.customer.name || r.customer.number)}</span>
+        <span class="sub">${r.state === 'ringing' ? `ringing ${esc(r.ringingAgent)}` : 'waiting'} · ${mmss(r.waitingSec)}</span>
+      </div>`).join('')
+    : '<span class="sub">No one is waiting.</span>';
+}
+
 (async () => {
   await mountShell({ active: '/voice' });
+  loadQueue();
+  setInterval(loadQueue, 5000);
   // Calls only ring browsers whose status is "available".
   if (me.presence !== 'available') log(`your status is "${me.presence}" — set it to available to receive calls`);
   await setup();

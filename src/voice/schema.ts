@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS voice_calls (
   language           TEXT,
   engine             TEXT,
   details            TEXT,
+  assistant_handoff  TEXT,
+  voicemail_url      TEXT,
+  voicemail_sec      INTEGER,
   created_at         INTEGER NOT NULL
 );
 
@@ -40,6 +43,22 @@ CREATE TABLE IF NOT EXISTS voice_numbers (
   last_checked_at  INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_voice_numbers_org ON voice_numbers(org_id);
+
+-- One row per call that waited in line (or found it full). Our order, not
+-- Twilio's: a caller whose agent doesn't answer goes back in at their place.
+CREATE TABLE IF NOT EXISTS voice_queue_waits (
+  call_sid       TEXT PRIMARY KEY REFERENCES voice_calls(call_sid) ON DELETE CASCADE,
+  org_id         TEXT,
+  queue_sid      TEXT,
+  state          TEXT NOT NULL CHECK (state IN ('waiting', 'ringing', 'done')),
+  agent_user_id  TEXT,
+  attempts       INTEGER NOT NULL DEFAULT 0,
+  outcome        TEXT CHECK (outcome IN ('answered', 'abandoned', 'timeout', 'full')),
+  joined_at      INTEGER NOT NULL,
+  offered_at     INTEGER,
+  left_at        INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_voice_queue_open ON voice_queue_waits(state, org_id, joined_at);
 
 -- Final sentences only. Twilio retries webhooks, so the key makes repeats no-ops.
 CREATE TABLE IF NOT EXISTS voice_transcript_segments (
@@ -60,4 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_voice_segments_call ON voice_transcript_segments(
     db.query<{ name: string }, []>("PRAGMA table_info(voice_calls)").all().map((column) => column.name),
   );
   if (!callColumns.has("org_id")) db.exec("ALTER TABLE voice_calls ADD COLUMN org_id TEXT");
+  if (!callColumns.has("voicemail_url")) db.exec("ALTER TABLE voice_calls ADD COLUMN voicemail_url TEXT");
+  if (!callColumns.has("voicemail_sec")) db.exec("ALTER TABLE voice_calls ADD COLUMN voicemail_sec INTEGER");
+  if (!callColumns.has("assistant_handoff")) db.exec("ALTER TABLE voice_calls ADD COLUMN assistant_handoff TEXT");
 }

@@ -29,6 +29,53 @@ export interface VoiceSettings {
   transcription: boolean;
 }
 
+/** An incoming call, as an assistant sees it before answering. */
+export interface VoiceAssistantCallInfo {
+  callSid: string;
+  /** Null for the platform number. */
+  orgId: string | null;
+  from: string;
+  to: string;
+  callerName: string | null;
+  /** How many people the call would ring right now. */
+  agentsAvailable: number;
+}
+
+/** What an assistant does next: speak, hand the call to people, or hang up.
+ *  The voice package says a short fixed line before handing over or hanging up. */
+export type VoiceAssistantAction =
+  | { say: string }
+  | { handoff: string } // a one-line summary for the person who answers
+  | { hangup: true };
+
+/** One answered call. */
+export interface VoiceAssistantCall {
+  /** Spoken as soon as the call connects. */
+  greeting: string;
+  /** The caller finished a sentence. Yield the reply in pieces as it is
+   *  written; `signal` aborts when the caller talks over it. */
+  reply(callerText: string, signal: AbortSignal): AsyncIterable<VoiceAssistantAction>;
+  /** The caller talked over the reply and heard only `heard`. */
+  interrupted?(heard: string): void;
+  /** The assistant's part of the call is over (handoff, hangup or caller gone). */
+  ended?(): void;
+}
+
+/** Something that can answer calls, e.g. an AI model. The voice package
+ *  knows nothing else about it. */
+export interface VoiceAssistant {
+  /** Called for every incoming call. Return null to ring people as usual. */
+  answer(call: VoiceAssistantCallInfo): VoiceAssistantCall | null;
+}
+
+/** The waiting line for one organisation. Unset fields use the defaults. */
+export interface VoiceQueueSettings {
+  /** Longest wait before the caller is offered voicemail. Default 300. */
+  maxWaitSec?: number;
+  /** Most callers in line; the next goes to voicemail. Default 10. */
+  maxSize?: number;
+}
+
 export interface VoiceOptions {
   /** bun:sqlite database. The voice tables are created in it if missing. */
   db: Database;
@@ -41,6 +88,11 @@ export interface VoiceOptions {
   };
   /** A known name for a caller's number, e.g. from the host's contacts. */
   contactName?: (phoneNumber: string) => string | null;
+  /** Answers incoming calls before (or instead of) ringing people. See relay.ts. */
+  assistant?: VoiceAssistant;
+  /** Callers wait in line when everyone is busy. Null (or no option) = no
+   *  line for that organisation: the caller goes to voicemail. See queue.ts. */
+  queue?: (orgId: string | null) => VoiceQueueSettings | null;
   /** Check pending number transfers in the background. Default true. */
   watchNumbers?: boolean;
 }
