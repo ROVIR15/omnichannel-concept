@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS voice_calls (
   language           TEXT,
   engine             TEXT,
   details            TEXT,
+  assistant_handoff  TEXT,
   created_at         INTEGER NOT NULL
 );
 
@@ -60,4 +61,5 @@ CREATE INDEX IF NOT EXISTS idx_voice_segments_call ON voice_transcript_segments(
     db.query<{ name: string }, []>("PRAGMA table_info(voice_calls)").all().map((column) => column.name),
   );
   if (!callColumns.has("org_id")) db.exec("ALTER TABLE voice_calls ADD COLUMN org_id TEXT");
+  if (!callColumns.has("assistant_handoff")) db.exec("ALTER TABLE voice_calls ADD COLUMN assistant_handoff TEXT");
 }

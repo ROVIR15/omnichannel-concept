@@ -1,6 +1,6 @@
 # Voice package (`src/voice`)
 
-Last updated: 2026-10-20
+Last updated: 2026-10-27
 
 Phone calls through Twilio: agents call and answer in the browser, calls are routed to each organisation's agents, and calls can be transcribed. There's no Twilio SDK. Everything is plain `fetch`, a small JWT and a few lines of TwiML.
 
@@ -15,6 +15,7 @@ Phone calls through Twilio: agents call and answer in the browser, calls are rou
 | `twilio.ts` | Talking to Twilio: browser token, signature check, TwiML, REST helpers. |
 | `numbers.ts` | Phone numbers per organisation: add, transfer watcher, routing lookups. |
 | `transcripts.ts` | Call records and transcripts. |
+| `relay.ts` | An assistant (e.g. AI) answering calls, through Twilio ConversationRelay. |
 
 The package imports nothing from the rest of the app. Everything it needs comes in through `initVoice()`, so another project can copy the folder and use it.
 
@@ -98,6 +99,8 @@ In the Twilio Console, point these at your public URL (an ngrok tunnel when loca
 | Method | Path | Does |
 |---|---|---|
 | POST | `/webhooks/twilio/voice` | Starts every call. Browser → dials the number; phone → rings agents. |
+| WS | `/webhooks/twilio/relay` | The assistant's ConversationRelay socket. Checked by one-time token. |
+| POST | `/webhooks/twilio/relay-end` | The assistant finished: ring people or hang up. |
 | POST | `/webhooks/twilio/transcription` | One transcribed sentence (or start/stop/error). |
 | POST | `/webhooks/twilio/status` | Call status updates (logged). |
 | POST | `/webhooks/twilio/recording` | Recording updates (logged). |
@@ -118,6 +121,48 @@ In the Twilio Console, point these at your public URL (an ngrok tunnel when loca
 
 - **Incoming** (phone → our number): `orgForNumber(To)` finds the organisation, and `availableUserIds(orgId)` gives the agents to ring. Every available agent rings at once; the first to answer gets the call. A number linked to no organisation rings everyone available.
 - **Outgoing** (browser → phone): the caller ID is `callerIdFor(agent)`: the agent's organisation number, or else the platform number.
+
+## An assistant answering calls
+
+Pass `assistant` to `initVoice()` and an incoming call can be answered by something other than a person, e.g. an AI. The package knows only this contract (`context.ts`):
+
+```ts
+assistant: {
+  answer(call) {                       // { callSid, orgId, from, to, callerName, agentsAvailable }
+    if (!wantToAnswer) return null;    // null = ring people as usual
+    return {
+      greeting: "Hello, how can I help?",
+      async *reply(callerText, signal) {   // signal aborts when the caller talks over you
+        yield { say: "Sure, " };          // spoken as it arrives
+        yield { handoff: "Wants to change a booking." }; // or { hangup: true }
+      },
+      interrupted(heard) {},               // optional: what the caller actually heard
+      ended() {},                          // optional
+    };
+  },
+},
+```
+
+And give Bun the socket:
+
+```ts
+Bun.serve({
+  websocket: voice.relay.websocket,
+  async fetch(req, server) {
+    const url = new URL(req.url);
+    if (voice.relay.upgrade(req, url, server)) return;
+    // ...
+  },
+});
+```
+
+**One call:** the voice webhook calls `answer()`. On yes it returns `<Connect><ConversationRelay>` with a one-time token; Twilio opens `/webhooks/twilio/relay` (a WebSocket) and sends that token back in `setup`. Twilio turns each caller sentence into text, we stream the reply back as text, Twilio speaks it. A handoff or hangup ends the session; Twilio then posts to `/webhooks/twilio/relay-end`, which says a fixed line and rings people (handoff, or the relay failed) or hangs up.
+
+**Transcript:** the assistant's lines are stored with speaker `assistant`, the caller's as `customer`. After a handoff, Real-Time Transcription (if on) adds the person's part. The handoff summary is in the transcript's `handoff` field.
+
+**Twilio setup:** ConversationRelay needs the *Predictive and Generative AI/ML Features Addendum* accepted once per account (Console → Voice → Settings → General). Nothing else: the WebSocket URL is in the TwiML, on the same host as the voice webhook.
+
+**In this app**, `src/call-assistant.ts` is the assistant: one `ai.session()` per call with `transfer_to_agent` and `end_call` tools. Settings → AI provider → *AI Answers Calls*: `off`, `always`, or `when-no-agents`.
 
 ## Using it from other code
 
@@ -165,3 +210,4 @@ All three are created by `initVoice()` (`schema.ts`).
 - `docs/call-channel/call-transcripts.md`: the transcript format and the speaker-label gotcha.
 - `docs/call-channel/connect-number.md`: how number transfer works.
 - `docs/call-channel/onboard-phone-number.md`: the onboarding steps for a new client.
+- `src/ai/README.md`: the AI package, and how it will answer calls through this package.
