@@ -10,6 +10,7 @@ import {
   deleteShopifyConnection,
   getOrg,
   shopifyConnection,
+  updateShopifyTokens,
   upsertShopifyConnection,
 } from "../store";
 
@@ -101,6 +102,8 @@ function verifyHmac(params: URLSearchParams, apiSecret: string): boolean {
 
 interface AccessTokenResponse {
   access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
   scope?: string;
   errors?: string;
 }
@@ -123,10 +126,10 @@ export async function completeShopifyOAuth(state: string, params: URLSearchParam
   const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ client_id: values.apiKey, client_secret: values.apiSecret, code }),
+    body: JSON.stringify({ client_id: values.apiKey, client_secret: values.apiSecret, code, expiring: 1 }),
   });
   const tokens: AccessTokenResponse = await response.json().catch(() => ({}));
-  if (!response.ok || !tokens.access_token) {
+  if (!response.ok || !tokens.access_token || !tokens.refresh_token || !tokens.expires_in) {
     throw new Error(tokens.errors ?? `Shopify token exchange failed (HTTP ${response.status})`);
   }
 
@@ -134,6 +137,8 @@ export async function completeShopifyOAuth(state: string, params: URLSearchParam
     orgId: pending.orgId,
     shopDomain: shop,
     accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt: Date.now() + tokens.expires_in * 1000,
     scope: tokens.scope ?? SHOPIFY_SCOPES.join(","),
   });
   return { orgId: pending.orgId, shopDomain: connection.shop_domain, scope: connection.scope };
@@ -151,9 +156,38 @@ export function disconnectShopify(orgId: string): void {
 
 const API_VERSION = "2024-10";
 
-async function adminGet<T>(orgId: string, path: string): Promise<T> {
+async function freshShopifyConnection(orgId: string) {
   const connection = shopifyConnection(orgId);
   if (!connection) throw new Error("Shopify is not connected for this organisation");
+  if (connection.expires_at && connection.expires_at > Date.now() + 60_000) return connection;
+  if (!connection.refresh_token) throw new Error("Shopify must be reconnected to issue an expiring offline token");
+
+  const values = requiredConfig();
+  const response = await fetch(`https://${connection.shop_domain}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: values.apiKey,
+      client_secret: values.apiSecret,
+      refresh_token: connection.refresh_token,
+    }),
+  });
+  const tokens: AccessTokenResponse = await response.json().catch(() => ({}));
+  if (!response.ok || !tokens.access_token || !tokens.refresh_token || !tokens.expires_in) {
+    throw new Error(tokens.errors ?? `Shopify token refresh failed (HTTP ${response.status})`);
+  }
+  return updateShopifyTokens({
+    orgId,
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt: Date.now() + tokens.expires_in * 1000,
+    scope: tokens.scope,
+  });
+}
+
+async function adminGet<T>(orgId: string, path: string): Promise<T> {
+  const connection = await freshShopifyConnection(orgId);
   const response = await fetch(`https://${connection.shop_domain}/admin/api/${API_VERSION}/${path}`, {
     headers: { "X-Shopify-Access-Token": connection.access_token },
   });

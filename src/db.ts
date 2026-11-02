@@ -117,12 +117,14 @@ CREATE TABLE IF NOT EXISTS shopify_oauth_states (
   expires_at  INTEGER NOT NULL
 );
 
--- One Shopify store connected per organisation. The access token Shopify
--- issues for a custom/OAuth app does not expire on its own.
+-- One Shopify store connected per organisation. Public apps receive an expiring offline access
+-- token plus a rotating refresh token; custom apps can still leave the refresh fields null.
 CREATE TABLE IF NOT EXISTS shopify_connections (
   org_id        TEXT PRIMARY KEY REFERENCES organisations(id) ON DELETE CASCADE,
   shop_domain   TEXT NOT NULL UNIQUE,
   access_token  TEXT NOT NULL,
+  refresh_token TEXT,
+  expires_at    INTEGER,
   scope         TEXT NOT NULL,
   connected_at  INTEGER NOT NULL
 );
@@ -206,6 +208,16 @@ for (const [name, type] of [
   ["references_header", "TEXT"],
 ] as const) {
   if (!messageColumns.has(name)) sqlite.exec(`ALTER TABLE messages ADD COLUMN ${name} ${type}`);
+}
+
+const shopifyColumns = new Set(
+  sqlite.query<{ name: string }, []>("PRAGMA table_info(shopify_connections)").all().map((column) => column.name),
+);
+for (const [name, type] of [
+  ["refresh_token", "TEXT"],
+  ["expires_at", "INTEGER"],
+] as const) {
+  if (!shopifyColumns.has(name)) sqlite.exec(`ALTER TABLE shopify_connections ADD COLUMN ${name} ${type}`);
 }
 
 export const uid = () => crypto.randomUUID();

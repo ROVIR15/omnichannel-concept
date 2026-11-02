@@ -97,7 +97,7 @@ export function upsertAccount(a: Omit<ChannelAccount, "id"> & { id?: string }): 
     q(`UPDATE channel_accounts SET org_id=?, channel_type=?, credential_source=?,
          external_id=?, display_name=?, status=?, credentials=? WHERE id=?`)
       .run(a.orgId, a.channelType, a.credentialSource, a.externalId,
-           a.displayName, status, JSON.stringify(a.credentials), a.id);
+        a.displayName, status, JSON.stringify(a.credentials), a.id);
     return getAccount(a.id)!;
   }
   const id = a.id ?? uid();
@@ -105,7 +105,7 @@ export function upsertAccount(a: Omit<ChannelAccount, "id"> & { id?: string }): 
        (id, org_id, channel_type, credential_source, external_id, display_name, status, credentials, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(id, a.orgId, a.channelType, a.credentialSource, a.externalId,
-         a.displayName, status, JSON.stringify(a.credentials), Date.now());
+      a.displayName, status, JSON.stringify(a.credentials), Date.now());
   return getAccount(id)!;
 }
 
@@ -152,9 +152,9 @@ export function resolveContact(opts: {
   const id = uid();
   q("INSERT INTO contacts (id, org_id, display_name, primary_email, primary_phone, created_at) VALUES (?,?,?,?,?,?)")
     .run(id, opts.orgId, opts.displayName || opts.externalUserId,
-         opts.channelType === "email" ? opts.externalUserId : null,
-         opts.channelType === "whatsapp" ? opts.externalUserId : null,
-         Date.now());
+      opts.channelType === "email" ? opts.externalUserId : null,
+      opts.channelType === "whatsapp" ? opts.externalUserId : null,
+      Date.now());
 
   q("INSERT INTO contact_identities (id, contact_id, org_id, channel_type, external_user_id, verified) VALUES (?,?,?,?,?,0)")
     .run(uid(), id, opts.orgId, opts.channelType, opts.externalUserId);
@@ -189,7 +189,7 @@ export function findOrCreateConversation(opts: {
        (id, org_id, account_id, contact_id, channel_type, status, subject, thread_hint, last_inbound_at, last_message_at, created_at)
      VALUES (?, ?, ?, ?, ?, 'open', ?, ?, 0, ?, ?)`)
     .run(id, opts.orgId, opts.accountId, opts.contactId, opts.channelType,
-         opts.subject ?? null, opts.threadHint ?? null, Date.now(), Date.now());
+      opts.subject ?? null, opts.threadHint ?? null, Date.now(), Date.now());
   return getConversation(id)!;
 }
 
@@ -224,9 +224,9 @@ export function addMessage(m: {
           sender, recipient, rfc_message_id, references_header, status, error, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, m.conversationId, m.direction, m.type, m.body,
-           JSON.stringify(m.attachments), m.externalMessageId ?? null,
-           m.sender ?? null, m.recipient ?? null, m.rfcMessageId ?? null,
-           m.references ?? null, m.status, m.error ?? null, now);
+        JSON.stringify(m.attachments), m.externalMessageId ?? null,
+        m.sender ?? null, m.recipient ?? null, m.rfcMessageId ?? null,
+        m.references ?? null, m.status, m.error ?? null, now);
   } catch (err: unknown) {
     // Unique index on external_message_id — a retried webhook lands here.
     if (err instanceof Error && err.message.includes("UNIQUE")) return null;
@@ -324,7 +324,8 @@ export function consumeShopifyOAuthState(state: string): { orgId: string; shop: 
 // ---------- Shopify connection -------------------------------------------
 
 export interface ShopifyConnection {
-  org_id: string; shop_domain: string; access_token: string; scope: string; connected_at: number;
+  org_id: string; shop_domain: string; access_token: string; refresh_token: string | null;
+  expires_at: number | null; scope: string; connected_at: number;
 }
 
 export function shopifyConnection(orgId: string): ShopifyConnection | null {
@@ -332,17 +333,31 @@ export function shopifyConnection(orgId: string): ShopifyConnection | null {
 }
 
 export function upsertShopifyConnection(input: {
-  orgId: string; shopDomain: string; accessToken: string; scope: string;
+  orgId: string; shopDomain: string; accessToken: string; refreshToken: string;
+  expiresAt: number; scope: string;
 }): ShopifyConnection {
   q(`
-    INSERT INTO shopify_connections (org_id, shop_domain, access_token, scope, connected_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO shopify_connections
+      (org_id, shop_domain, access_token, refresh_token, expires_at, scope, connected_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(org_id) DO UPDATE SET
       shop_domain = excluded.shop_domain,
       access_token = excluded.access_token,
+      refresh_token = excluded.refresh_token,
+      expires_at = excluded.expires_at,
       scope = excluded.scope,
       connected_at = excluded.connected_at
-  `).run(input.orgId, input.shopDomain, input.accessToken, input.scope, Date.now());
+  `).run(input.orgId, input.shopDomain, input.accessToken, input.refreshToken, input.expiresAt, input.scope, Date.now());
+  return shopifyConnection(input.orgId)!;
+}
+
+export function updateShopifyTokens(input: {
+  orgId: string; accessToken: string; refreshToken: string; expiresAt: number; scope?: string;
+}): ShopifyConnection {
+  q(`UPDATE shopify_connections
+       SET access_token = ?, refresh_token = ?, expires_at = ?, scope = COALESCE(?, scope)
+       WHERE org_id = ?`)
+    .run(input.accessToken, input.refreshToken, input.expiresAt, input.scope ?? null, input.orgId);
   return shopifyConnection(input.orgId)!;
 }
 
