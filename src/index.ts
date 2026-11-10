@@ -3,7 +3,9 @@
 
 import { authorize, availableUserIds, getUser, handleAuthRoutes } from "./auth";
 import { sqlite } from "./db";
+import { initAi, type AiProtocol } from "./ai";
 import { initVoice } from "./voice";
+import { callAssistant } from "./call-assistant";
 import { ingest, inbox, reply, startConversation } from "./core";
 import { signingSecrets } from "./connectors/meta";
 import { connectorFor } from "./registry";
@@ -51,6 +53,20 @@ import type { Attachment, ChannelAccount, ChannelType, WebhookRequest } from "./
 
 seedIfEmpty();
 
+// AI provider (src/ai): any OpenAI-compatible or Anthropic API, from Settings.
+const ai = initAi({
+  provider: () => {
+    const baseUrl = appSetting("ai_base_url").trim();
+    const model = appSetting("ai_model").trim();
+    if (!baseUrl || !model) return null;
+    const protocol = appSetting("ai_protocol").trim().toLowerCase();
+    return {
+      baseUrl, model, apiKey: appSetting("ai_api_key"),
+      ...((protocol === "openai" || protocol === "anthropic") && { protocol: protocol as AiProtocol }),
+    };
+  },
+});
+
 // Phone calls (src/voice): Twilio settings from Settings, people from auth,
 // caller names from contacts.
 const voice = initVoice({
@@ -65,6 +81,8 @@ const voice = initVoice({
     transcription: /^(on|true|yes|1)$/i.test(appSetting("twilio_transcription").trim()),
   }),
   users: { get: getUser, available: availableUserIds },
+  // The AI answers calls when Settings → AI Answers Calls says so.
+  assistant: callAssistant(ai, availableUserIds),
   contactName: (phone) => sqlite.query<{ display_name: string }, [string]>(
     "SELECT display_name FROM contacts WHERE primary_phone = ? LIMIT 1",
   ).get(phone)?.display_name ?? null,
@@ -219,12 +237,15 @@ async function handleWebhook(channel: ChannelType, req: Request, url: URL) {
 
 const server = Bun.serve({
   port: PORT,
-  async fetch(req) {
+  // The AI call assistant's socket (Twilio ConversationRelay).
+  websocket: voice.relay.websocket,
+  async fetch(req, server) {
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
 
     if (path === "/health") return json({ ok: true });
+    if (voice.relay.upgrade(req, url, server)) return;
 
     // Sign-in and role/organisation checks for everything below.
     const auth = await authorize(req, url);
@@ -286,6 +307,9 @@ const server = Bun.serve({
 
     // --- App settings (the Meta app you own as the provider) -------------
     if (path === "/api/settings" && method === "GET") return json(maskedAppSettings());
+
+    // Operator only (no access rule): spends a few tokens on the provider.
+    if (path === "/api/ai/test" && method === "POST") return json(await ai.test());
     if (path === "/api/whatsapp/usage" && method === "GET") return json(whatsappUsage());
 
     if (path === "/api/settings" && method === "POST") {
