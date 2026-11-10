@@ -15,7 +15,7 @@ import {
 } from "./oauth";
 import { seedIfEmpty } from "./seed";
 import { invalidLimitSetting } from "./limits";
-import { throttleInbound, whatsappUsage } from "./whatsapp";
+import { parseTwilioWhatsapp, throttleInbound, verifyTwilioWhatsapp, whatsappUsage } from "./whatsapp";
 import { APP_SETTING_FIELDS, appSetting, maskedAppSettings, saveAppSettings } from "./settings";
 import {
   completeGmailOAuth,
@@ -235,6 +235,37 @@ async function handleWebhook(channel: ChannelType, req: Request, url: URL) {
   return new Response("EVENT_RECEIVED", { status: 200 });
 }
 
+/** WhatsApp via Twilio. Same steps as handleWebhook (parse, verify,
+ *  throttle, ingest) but Twilio posts a form and expects TwiML back.
+ *  Always 200 unless the signature is bad, so Twilio doesn't retry. */
+async function handleTwilioWhatsappWebhook(req: Request, url: URL) {
+  const ok = () => new Response("<Response/>", { status: 200, headers: { "content-type": "text/xml" } });
+
+  const form = await req.formData().catch(() => null);
+  const params: Record<string, string> = {};
+  form?.forEach((v, k) => { params[k] = String(v); });
+
+  const parsed = parseTwilioWhatsapp(params);
+  const first = parsed[0];
+  if (!first) {
+    console.log(`[whatsapp/twilio] no message in delivery — keys: ${Object.keys(params).join(", ") || "(none)"}`);
+    return ok();
+  }
+
+  const account = accountByExternal("whatsapp", first.accountExternalId);
+  const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
+  const publicUrl = `${proto}://${host}${url.pathname}${url.search}`;
+  if (!verifyTwilioWhatsapp(publicUrl, params, req.headers.get("x-twilio-signature"), account ?? undefined)) {
+    console.warn(`[whatsapp/twilio] signature rejected — to=${first.accountExternalId} url=${publicUrl}`);
+    return new Response("invalid signature", { status: 401 });
+  }
+
+  const { allowed, throttled } = throttleInbound(parsed);
+  console.log(`[whatsapp/twilio] ${JSON.stringify({ ...ingest(allowed), throttled: throttled.length })}`);
+  return ok();
+}
+
 const server = Bun.serve({
   port: PORT,
   // The AI call assistant's socket (Twilio ConversationRelay).
@@ -276,6 +307,7 @@ const server = Bun.serve({
     if (path === "/webhooks/meta") return handleWebhook("messenger", req, url);
     if (path === "/webhooks/line") return handleWebhook("line", req, url);
     if (path === "/webhooks/email") return handleWebhook("email", req, url);
+    if (path === "/webhooks/twilio/whatsapp" && method === "POST") return handleTwilioWhatsappWebhook(req, url);
 
     // --- Organisations --------------------------------------------------
     if (path === "/api/orgs" && method === "GET") {
@@ -751,4 +783,4 @@ const server = Bun.serve({
 console.log(`omnichannel concept listening on http://localhost:${server.port}`);
 console.log(`  console  → http://localhost:${server.port}/`);
 console.log(`  inbox    → http://localhost:${server.port}/inbox`);
-console.log(`  webhooks → /webhooks/meta  /webhooks/line  /webhooks/email`);
+console.log(`  webhooks → /webhooks/meta  /webhooks/line  /webhooks/email  /webhooks/twilio/whatsapp`);

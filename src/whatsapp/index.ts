@@ -5,6 +5,7 @@ import { TOTAL, inboundDailyLimiter, inboundLimiter } from "./inbound";
 import { outboundDailyLimiter, outboundLimiter } from "./outbound";
 
 export { whatsappConnector } from "./connector";
+export { parseTwilioWhatsapp, verifyTwilioWhatsapp } from "./twilio";
 export { throttleInbound, inboundDailyLimiter, inboundLimiter } from "./inbound";
 export { gateOutbound, outboundDailyLimiter, outboundLimiter } from "./outbound";
 export { whatsappDailyLimit, whatsappLimit, whatsappLimits } from "./config";
