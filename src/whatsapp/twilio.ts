@@ -13,11 +13,11 @@ import { gateOutbound } from "./outbound";
 
 export const isTwilioAccount = (a: ChannelAccount) => a.credentials.provider?.trim().toLowerCase() === "twilio";
 
-/** Account's own SID/token, else the app-level Twilio settings. */
-function twilioCreds(account?: ChannelAccount) {
+/** Always the app-level Twilio account from Settings (same one voice uses). */
+function twilioCreds() {
   return {
-    accountSid: account?.credentials.twilio_account_sid || appSetting("twilio_account_sid"),
-    authToken: account?.credentials.twilio_auth_token || appSetting("twilio_auth_token"),
+    accountSid: appSetting("twilio_account_sid"),
+    authToken: appSetting("twilio_auth_token"),
   };
 }
 
@@ -58,12 +58,12 @@ export function parseTwilioWhatsapp(params: Record<string, string>): NormalizedM
   }];
 }
 
-/** X-Twilio-Signature against the account's auth token (or the app one).
- *  No token anywhere = check skipped, like the Meta webhook in dev. */
+/** X-Twilio-Signature against the Twilio Auth Token in Settings.
+ *  Blank token = check skipped, like the Meta webhook in dev. */
 export function verifyTwilioWhatsapp(
-  publicUrl: string, params: Record<string, string>, header: string | null, account?: ChannelAccount,
+  publicUrl: string, params: Record<string, string>, header: string | null,
 ): boolean {
-  return twilioSignatureMatches(twilioCreds(account).authToken, publicUrl, params, header);
+  return twilioSignatureMatches(twilioCreds().authToken, publicUrl, params, header);
 }
 
 /** Twilio error codes that mean "slow down". */
@@ -73,8 +73,8 @@ const TWILIO_RATE_LIMIT_CODES = new Set([
 ]);
 
 export async function sendTwilioWhatsapp(account: ChannelAccount, out: OutboundMessage): Promise<SendResult> {
-  const { accountSid, authToken } = twilioCreds(account);
-  if (!accountSid || !authToken) return { ok: false, error: "Twilio Account SID and Auth Token are not set" };
+  const { accountSid, authToken } = twilioCreds();
+  if (!accountSid || !authToken) return { ok: false, error: "Twilio Account SID and Auth Token are not set in Settings" };
 
   const gate = gateOutbound();
   if (!gate.ok) return { ok: false, error: gate.error };

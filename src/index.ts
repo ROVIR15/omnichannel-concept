@@ -252,11 +252,10 @@ async function handleTwilioWhatsappWebhook(req: Request, url: URL) {
     return ok();
   }
 
-  const account = accountByExternal("whatsapp", first.accountExternalId);
   const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
   const publicUrl = `${proto}://${host}${url.pathname}${url.search}`;
-  if (!verifyTwilioWhatsapp(publicUrl, params, req.headers.get("x-twilio-signature"), account ?? undefined)) {
+  if (!verifyTwilioWhatsapp(publicUrl, params, req.headers.get("x-twilio-signature"))) {
     console.warn(`[whatsapp/twilio] signature rejected — to=${first.accountExternalId} url=${publicUrl}`);
     return new Response("invalid signature", { status: 401 });
   }
