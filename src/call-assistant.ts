@@ -13,7 +13,9 @@ export type CallAnswering = "off" | "always" | "when-no-agents";
 
 export function callAnswering(): CallAnswering {
   const mode = appSetting("ai_call_answering").trim().toLowerCase();
-  return mode === "always" || mode === "when-no-agents" ? mode : "off";
+  if (mode === "when-no-agents") return mode;
+  // "on" is what people type for the other on/off settings.
+  return /^(always|on|true|yes|1)$/.test(mode) ? "always" : "off";
 }
 
 const DEFAULT_GREETING = "Hello, thanks for calling. How can I help you today?";
