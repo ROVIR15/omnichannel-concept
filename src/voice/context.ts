@@ -68,6 +68,14 @@ export interface VoiceAssistant {
   answer(call: VoiceAssistantCallInfo): VoiceAssistantCall | null;
 }
 
+/** The waiting line for one organisation. Unset fields use the defaults. */
+export interface VoiceQueueSettings {
+  /** Longest wait before the caller is offered voicemail. Default 300. */
+  maxWaitSec?: number;
+  /** Most callers in line; the next goes to voicemail. Default 10. */
+  maxSize?: number;
+}
+
 export interface VoiceOptions {
   /** bun:sqlite database. The voice tables are created in it if missing. */
   db: Database;
@@ -82,6 +90,9 @@ export interface VoiceOptions {
   contactName?: (phoneNumber: string) => string | null;
   /** Answers incoming calls before (or instead of) ringing people. See relay.ts. */
   assistant?: VoiceAssistant;
+  /** Callers wait in line when everyone is busy. Null (or no option) = no
+   *  line for that organisation: the caller goes to voicemail. See queue.ts. */
+  queue?: (orgId: string | null) => VoiceQueueSettings | null;
   /** Check pending number transfers in the background. Default true. */
   watchNumbers?: boolean;
 }

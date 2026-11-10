@@ -69,14 +69,47 @@ export function dialNumber(to: string, callerId: string, before = "") {
   return twiml(`${before}<Dial callerId="${xml(callerId)}" answerOnBridge="true"><Number>${xml(to)}</Number></Dial>`);
 }
 
-/** Phone → browsers. Rings every identity at once; first to answer wins. */
-export function dialClients(identities: string[], timeoutSeconds = 25, before = "") {
+/** Phone → browsers. Rings every identity at once; first to answer wins.
+ *  `actionUrl` gets the result (DialCallStatus) when the dial ends. */
+export function dialClients(identities: string[], timeoutSeconds = 25, before = "", actionUrl?: string) {
   if (identities.length === 0) {
     return twiml(`<Say>Sorry, no one is available to take your call. Please try again later.</Say><Hangup/>`);
   }
   const clients = identities.slice(0, 10).map((id) => `<Client>${xml(id)}</Client>`).join("");
-  return twiml(`${before}<Dial timeout="${timeoutSeconds}" answerOnBridge="true">${clients}</Dial>`);
+  const action = actionUrl ? ` action="${xml(actionUrl)}"` : "";
+  return twiml(`${before}<Dial timeout="${timeoutSeconds}" answerOnBridge="true"${action}>${clients}</Dial>`);
 }
+
+/** Ring one agent for a caller from the line. `answeredUrl` hears the
+ *  moment they pick up; `actionUrl` hears how the dial ended. */
+export function offerToAgent(agentId: string, actionUrl: string, answeredUrl: string, before = "") {
+  return twiml(`${before}<Dial timeout="20" answerOnBridge="true" action="${xml(actionUrl)}">`
+    + `<Client statusCallbackEvent="answered" statusCallback="${xml(answeredUrl)}">${xml(agentId)}</Client></Dial>`);
+}
+
+/** Put the caller in a Twilio queue. Twilio holds the call and fetches
+ *  `waitUrl` for what to play; `actionUrl` hears how they left. */
+export function enqueue(queueName: string, waitUrl: string, actionUrl: string, before = "") {
+  return twiml(`${before}<Enqueue waitUrl="${xml(waitUrl)}" waitUrlMethod="POST" action="${xml(actionUrl)}" method="POST">`
+    + `${xml(queueName)}</Enqueue>`);
+}
+
+/** Twilio's own hold music. Choosing your own is a later step. */
+export const HOLD_MUSIC = "https://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.mp3";
+
+/** What a waiting caller hears, on repeat: their place, then music. */
+export function waitMessage(position: number) {
+  const place = position <= 1 ? "You are next in line." : `You are number ${position} in line.`;
+  return twiml(`${say(`All our colleagues are busy. ${place} Please stay on the line.`)}<Play>${HOLD_MUSIC}</Play>`);
+}
+
+/** Let the caller leave a message. `actionUrl` gets the recording. */
+export function voicemail(actionUrl: string, before = "") {
+  return twiml(`${before}${say("Sorry, no one can take your call right now. Please leave a message after the tone.")}`
+    + `<Record maxLength="120" playBeep="true" action="${xml(actionUrl)}" method="POST"/><Hangup/>`);
+}
+
+export const stopTranscription = (name: string) => `<Stop><Transcription name="${xml(name)}"/></Stop>`;
 
 /** Fixed for now; a language setting is a later step. */
 export const TRANSCRIPT_LANGUAGE = "en-US";
@@ -85,8 +118,8 @@ export const transcriptionEnabled = () => voiceConfig().transcription;
 
 /** Real-Time Transcription of both sides of the call. <Start> doesn't block,
  *  so this goes before the <Dial>. Twilio posts each sentence to callbackUrl. */
-export function startTranscription(callbackUrl: string, labels: { inbound: string; outbound: string }) {
-  return `<Start><Transcription name="live" statusCallbackUrl="${xml(callbackUrl)}" track="both_tracks"`
+export function startTranscription(callbackUrl: string, labels: { inbound: string; outbound: string }, name = "live") {
+  return `<Start><Transcription name="${xml(name)}" statusCallbackUrl="${xml(callbackUrl)}" track="both_tracks"`
     + ` inboundTrackLabel="${xml(labels.inbound)}" outboundTrackLabel="${xml(labels.outbound)}"`
     + ` languageCode="${TRANSCRIPT_LANGUAGE}"/></Start>`;
 }
