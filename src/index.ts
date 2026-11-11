@@ -15,7 +15,7 @@ import {
 } from "./oauth";
 import { seedIfEmpty } from "./seed";
 import { invalidLimitSetting } from "./limits";
-import { parseTwilioWhatsapp, throttleInbound, verifyTwilioWhatsapp, whatsappUsage } from "./whatsapp";
+import { parseTwilioWhatsapp, throttleInbound, twilioSenders, verifyTwilioWhatsapp, whatsappUsage } from "./whatsapp";
 import { APP_SETTING_FIELDS, appSetting, maskedAppSettings, saveAppSettings } from "./settings";
 import {
   completeGmailOAuth,
@@ -47,7 +47,7 @@ import {
 } from "./integrations/shopify";
 import {
   accountByExternal, createOrg, deleteAccount, deleteOrg, getAccount, listAccounts,
-  listOrgs, renameOrg, upsertAccount, consumeGmailOAuthState, consumeOutlookOAuthState,
+  listOrgs, renameOrg, updateAccountConnection, upsertAccount, consumeGmailOAuthState, consumeOutlookOAuthState,
 } from "./store";
 import type { Attachment, ChannelAccount, ChannelType, WebhookRequest } from "./types";
 
@@ -125,6 +125,13 @@ function maskAccount(a: ChannelAccount) {
     displayName: a.displayName,
     status: a.status,
     provider: a.credentials.provider ?? null,
+    // Set when the number was registered through the Twilio Senders API.
+    twilioSender: a.credentials.twilioSenderSid ? {
+      sid: a.credentials.twilioSenderSid,
+      status: a.credentials.twilioSenderStatus || "CREATING",
+      verification: a.credentials.twilioVerification || "sms",
+      checkedAt: Number(a.credentials.twilioSenderCheckedAt) || null,
+    } : null,
     capabilities: connectorFor(a.channelType).capabilities(),
     fields: fields.map((f) => ({
       ...f,
@@ -145,6 +152,21 @@ function mergeCredentials(existing: Record<string, string>, incoming: Record<str
     merged[f.key] = v;
   }
   return merged;
+}
+
+/** Copy a Twilio sender's status onto the channel account made for it:
+ *  ONLINE = active, anything else = pending. Null if no account links it. */
+function syncSenderAccount(sender: any): ChannelAccount | null {
+  const account = accountByExternal("whatsapp", twilioSenders.senderNumber(sender));
+  if (!account || account.credentials.twilioSenderSid !== sender?.sid) return null;
+  const credentials = {
+    ...account.credentials,
+    twilioSenderStatus: String(sender.status ?? ""),
+    twilioSenderCheckedAt: String(Date.now()),
+  };
+  const status = sender.status === "ONLINE" ? "active" : "pending";
+  updateAccountConnection(account.id, credentials, status);
+  return { ...account, credentials, status };
 }
 
 const redirect = (to: string) => new Response(null, { status: 302, headers: { location: to } });
@@ -697,6 +719,11 @@ const server = Bun.serve({
           status: "pending",
           credentials: mergeCredentials(existing?.credentials ?? {}, b.credentials ?? {}, b.channelType),
         });
+        // A Twilio sender stays pending until Twilio says ONLINE.
+        if (saved.credentials.twilioSenderSid && saved.credentials.twilioSenderStatus !== "ONLINE") {
+          updateAccountConnection(saved.id, saved.credentials, "pending");
+          return json(maskAccount({ ...saved, status: "pending" }));
+        }
         return json(maskAccount(saved));
       } catch (err: any) {
         if (String(err?.message).includes("UNIQUE")) {
@@ -710,6 +737,87 @@ const server = Bun.serve({
     if (chanMatch && method === "DELETE") {
       deleteAccount(chanMatch[1]!);
       return json({ ok: true });
+    }
+
+    // --- WhatsApp senders via Twilio Senders API --------------------------
+    // Register numbers without the Twilio Console. See
+    // docs/whatsapp-channel/twilio-senders-api.md.
+    if (path === "/api/whatsapp/twilio/senders" && method === "GET") {
+      const r = await twilioSenders.listSenders(
+        Number(url.searchParams.get("pageSize")) || 50, url.searchParams.get("pageToken") ?? undefined,
+      );
+      return r.ok ? json(r.sender) : json({ error: r.error, code: r.code }, r.status);
+    }
+
+    if (path === "/api/whatsapp/twilio/senders" && method === "POST") {
+      const b = await body<any>(req);
+      if (!b) return json({ error: "invalid JSON body" }, 400);
+      // Point incoming messages at us unless the caller says otherwise.
+      const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
+      const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
+      const webhook = b.webhook ?? { callback_url: `${proto}://${host}/webhooks/twilio/whatsapp`, callback_method: "POST" };
+
+      // Refuse before calling Twilio if the number belongs to another org.
+      const number = twilioSenders.toE164(String(b.number ?? ""));
+      const existing = b.orgId ? accountByExternal("whatsapp", number) : null;
+      if (existing && existing.orgId !== b.orgId) {
+        return json({ error: "that number is already connected to another organisation" }, 409);
+      }
+
+      const r = await twilioSenders.createSender({
+        number, profile: b.profile, verificationMethod: b.verificationMethod, webhook,
+      });
+      if (!r.ok) return json({ error: r.error, code: r.code }, r.status);
+
+      // Optional: connect it to an organisation in the same call.
+      let account = null;
+      if (b.orgId) {
+        try {
+          const saved = upsertAccount({
+            id: existing?.id,
+            orgId: b.orgId,
+            channelType: "whatsapp",
+            credentialSource: "byo_keys",
+            externalId: twilioSenders.senderNumber(r.sender),
+            displayName: b.displayName?.trim() || `${b.profile?.name ?? "WhatsApp"} (Twilio)`,
+            status: "pending",
+            credentials: {
+              ...existing?.credentials, provider: "twilio", twilioSenderSid: r.sender.sid,
+              twilioVerification: b.verificationMethod === "voice" ? "voice" : "sms",
+            },
+          });
+          account = maskAccount(syncSenderAccount(r.sender) ?? saved);
+        } catch (err: any) {
+          return json({ sender: r.sender, error: `sender created, but connecting it failed: ${err?.message}` }, 409);
+        }
+      }
+      return json({ sender: r.sender, account }, 201);
+    }
+
+    const senderMatch = path.match(/^\/api\/whatsapp\/twilio\/senders\/(XE[0-9a-fA-F]{32})(\/verify)?$/);
+    if (senderMatch) {
+      const sid = senderMatch[1]!;
+      // Every read or verify also refreshes the linked channel account.
+      const reply = (r: Awaited<ReturnType<typeof twilioSenders.getSender>>) => {
+        if (!r.ok) return json({ error: r.error, code: r.code }, r.status);
+        const account = syncSenderAccount(r.sender);
+        return json({ sender: r.sender, account: account ? maskAccount(account) : null });
+      };
+      if (senderMatch[2]) {
+        if (method !== "POST") return json({ error: "method not allowed" }, 405);
+        const b = await body<{ code?: string }>(req);
+        return reply(await twilioSenders.verifySender(sid, b?.code ?? ""));
+      }
+      if (method === "GET") return reply(await twilioSenders.getSender(sid));
+      if (method === "POST") {
+        const b = await body<any>(req);
+        if (!b) return json({ error: "invalid JSON body" }, 400);
+        return reply(await twilioSenders.updateSender(sid, { profile: b.profile, webhook: b.webhook }));
+      }
+      if (method === "DELETE") {
+        const r = await twilioSenders.deleteSender(sid);
+        return r.ok ? json({ ok: true }) : json({ error: r.error, code: r.code }, r.status);
+      }
     }
 
     // --- Facebook Login (Messenger + Instagram) ---------------------------

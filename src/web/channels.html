@@ -66,6 +66,19 @@
   .num-note.err { color:var(--bad); }
   .num-add { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
   .num-add input { flex:1; min-width:180px; max-width:260px; }
+  /* Twilio sender registration */
+  .tw-panel { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:14px; }
+  .tw-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .tw-state { font-size:12px; padding:2px 8px; border-radius:6px; background:#b4530914; color:var(--warn); }
+  .tw-state.online { background:#16a34a1a; color:var(--ok); }
+  .tw-state.bad { background:#dc26261a; color:var(--bad); }
+  .tw-code { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  .tw-code input { width:140px; letter-spacing:.25em; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .tw-radio { display:flex; gap:18px; flex-wrap:wrap; }
+  .tw-radio label { display:flex; gap:6px; align-items:center; font-weight:400; }
+  .tw-radio input { width:auto; margin:0; }
+  details.tw-more { margin:6px 0 14px; }
+  details.tw-more summary { cursor:pointer; color:var(--muted); font-size:13px; }
   @media (max-width:640px){ .summary-caps { margin-left:0; width:100%; } }
 </style>
 </head>
@@ -119,6 +132,8 @@ const CONNECT_METHODS = {
       hint:'The client approves in Meta’s popup and never sees an access token. Needs POST /api/connect/whatsapp (src/oauth.ts is written, not routed).' },
     { id:'manual', title:'Paste credentials', ready:true,
       hint:'Enter the phone number ID and access token from the Meta app dashboard.' },
+    { id:'twilio_senders', title:'Register with Twilio', ready:true,
+      hint:'Make a new WhatsApp number in Twilio. Uses the Twilio keys from Settings.' },
   ],
   messenger: [
     { id:'meta_login', title:'Connect with Facebook', ready:true,
@@ -179,6 +194,7 @@ async function loadChannels() {
         </span>
       </summary>
       <div class="chan-body">
+        ${a.twilioSender ? senderPanelHtml(a) : ''}
         <div class="grid">
           <div class="field">
             <label>Display name</label>
@@ -206,6 +222,7 @@ async function loadChannels() {
   }));
   $$('[data-save]').forEach(b => b.onclick = () => saveAccount(b.dataset.save));
   $$('[data-del]').forEach(b => b.onclick = () => removeAccount(b.dataset.del));
+  bindSenderPanels($('#channels'));
 }
 
 async function saveAccount(id) {
@@ -279,6 +296,7 @@ function renderMethodBody() {
   if (pickedMethod === 'gmail') return renderGmailBody(body);
   if (pickedMethod === 'outlook') return renderOutlookBody(body);
   if (pickedMethod === 'meta_login') return renderFacebookBody(body);
+  if (pickedMethod === 'twilio_senders') return renderTwilioSenderBody(body);
   if (!CONNECT_METHODS[pickedChannel]?.find(m => m.id === pickedMethod)?.ready) { body.innerHTML = ''; return; }
   renderManualBody(body);
 }
@@ -455,6 +473,178 @@ async function loadFacebookPages() {
     facebook = { ...facebook, session:'', pages:null };
     setStatus(e.message, 'err');
   }
+}
+
+// ---------- WhatsApp via Twilio Senders API ----------
+// Register → (OTP if Meta sends one) → wait for ONLINE. Status is checked
+// by button only: Twilio asks for minutes between Senders API calls.
+const WA_VERTICALS = ['Other','Automotive','Beauty, Spa and Salon','Clothing and Apparel','Education',
+  'Entertainment','Event Planning and Service','Finance and Banking','Food and Grocery','Public Service',
+  'Hotel and Lodging','Medical and Health','Non-profit','Professional Services','Shopping and Retail',
+  'Travel and Transportation','Restaurant'];
+// Last registration from this page: kept so "Send again" can resend the code.
+let twReg = null;
+
+function senderStateHtml(status) {
+  if (status === 'ONLINE') return '<span class="tw-state online">✅ Online</span>';
+  if (/FAIL|REJECT|DELETED/i.test(status)) return `<span class="tw-state bad">⚠️ ${esc(status)}</span>`;
+  return `<span class="tw-state">⏳ ${esc(status || 'CREATING')}</span>`;
+}
+
+function senderPanelHtml(a, { resend = false } = {}) {
+  const t = a.twilioSender;
+  const online = t.status === 'ONLINE';
+  const how = t.verification === 'voice'
+    ? 'Meta calls this number with a code. Twilio number? The code comes by email from the Voicemail Twimlet.'
+    : 'Meta sends a code by SMS. Twilio SMS number? No code needed. Twilio checks it, just wait.';
+  return `
+    <div class="tw-panel" data-tw="${a.id}">
+      <div class="tw-head">
+        <span class="num-phone">${esc(a.externalId)}</span>
+        ${senderStateHtml(t.status)}
+        <span class="summary-id">${esc(t.sid)}</span>
+      </div>
+      ${online
+        ? `<div class="num-note">Registered with WhatsApp. Messages land in the Inbox.</div>`
+        : `<div class="num-steps">${how}</div>
+           <div class="tw-code">
+             <input data-tw-code placeholder="123456" inputmode="numeric" autocomplete="one-time-code" aria-label="Verification code" />
+             <button class="small" data-tw-verify>Verify</button>
+             ${resend ? '<button class="ghost small" data-tw-resend>Send code again</button>' : ''}
+           </div>
+           <div class="num-note">Takes a few minutes after verify. OFFLINE right after is normal.</div>`}
+      <div class="num-note">Last checked: ${ago(t.checkedAt)} · <a href="#" data-tw-check>Check now</a></div>
+      <div class="status" data-tw-status></div>
+    </div>`;
+}
+
+function bindSenderPanels(root) {
+  root.querySelectorAll('[data-tw]').forEach(panel => {
+    const a = channels.accounts.find(x => x.id === panel.dataset.tw);
+    if (!a) return;
+    const sid = a.twilioSender.sid;
+    const say = (msg, kind) => {
+      const n = panel.querySelector('[data-tw-status]');
+      n.className = msg ? 'status show ' + kind : 'status';
+      n.textContent = msg || '';
+    };
+    const after = async (r, okMsg) => {
+      await loadChannels();
+      if (pickedMethod === 'twilio_senders') renderMethodBody();
+      toast(r.sender?.status === 'ONLINE' ? 'WhatsApp number is online' : okMsg);
+    };
+
+    const check = panel.querySelector('[data-tw-check]');
+    if (check) check.onclick = async e => {
+      e.preventDefault();
+      say('Checking with Twilio…', 'busy');
+      try { const r = await api(`/api/whatsapp/twilio/senders/${sid}`); await after(r, `Status: ${r.sender?.status}`); }
+      catch (err) { say(err.message, 'err'); }
+    };
+
+    const verify = panel.querySelector('[data-tw-verify]');
+    if (verify) verify.onclick = async () => {
+      const code = panel.querySelector('[data-tw-code]').value.trim();
+      if (!code) return say('Type the code first.', 'err');
+      verify.disabled = true;
+      say('Sending code to Twilio…', 'busy');
+      try { await after(await jsonPost(`/api/whatsapp/twilio/senders/${sid}/verify`, { code }), 'Code sent. Check again in a few minutes.'); }
+      catch (err) { verify.disabled = false; say(err.message, 'err'); }
+    };
+
+    const resend = panel.querySelector('[data-tw-resend]');
+    if (resend) resend.onclick = async () => {
+      if (!twReg) return;
+      if (!confirm('Ask for a new code? Twilio wants a few minutes between requests.')) return;
+      resend.disabled = true;
+      say('Asking Twilio for a new code…', 'busy');
+      try {
+        const r = await jsonPost('/api/whatsapp/twilio/senders', twReg.input);
+        twReg.accountId = r.account?.id || twReg.accountId;
+        await after(r, 'New code requested');
+      } catch (err) { resend.disabled = false; say(err.message, 'err'); }
+    };
+  });
+}
+
+function renderTwilioSenderBody(body) {
+  // Step 2: just registered here, and not yet online.
+  const reg = twReg && channels.accounts.find(x => x.id === twReg.accountId);
+  if (reg?.twilioSender) {
+    body.innerHTML = senderPanelHtml(reg, { resend: true }) +
+      `<button class="ghost small" id="twAnother">Register another number</button>`;
+    bindSenderPanels(body);
+    $('#twAnother').onclick = () => { twReg = null; setStatus(''); renderMethodBody(); };
+    return;
+  }
+
+  // Step 1: the form.
+  body.innerHTML = `
+    <div class="grid">
+      <div class="field">
+        <label>Phone number *</label>
+        <input id="twNumber" placeholder="+15017122661" />
+        <div class="help">E.164. Must not be on WhatsApp already.</div>
+      </div>
+      <div class="field">
+        <label>Display name *</label>
+        <input id="twName" placeholder="Acme Support" />
+        <div class="help">Must follow Meta's display name rules. Try one number first.</div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Code comes by</label>
+      <div class="tw-radio">
+        <label><input type="radio" name="twVerify" value="sms" checked /> SMS</label>
+        <label><input type="radio" name="twVerify" value="voice" /> Voice call</label>
+      </div>
+    </div>
+    <details class="tw-more">
+      <summary>More profile (optional)</summary>
+      <div class="grid" style="margin-top:10px">
+        <div class="field"><label>About</label><input id="twAbout" maxlength="139" placeholder="Hi! We are Acme." /></div>
+        <div class="field"><label>Vertical</label>
+          <select id="twVertical">${WA_VERTICALS.map(v => `<option>${esc(v)}</option>`).join('')}</select></div>
+        <div class="field"><label>Address</label><input id="twAddress" /></div>
+        <div class="field"><label>Description</label><input id="twDescription" /></div>
+        <div class="field"><label>Logo URL</label><input id="twLogo" placeholder="https://…/logo.png" /></div>
+        <div class="field"><label>Website</label><input id="twWebsite" placeholder="https://…" /></div>
+        <div class="field"><label>Email</label><input id="twEmail" placeholder="support@…" /></div>
+      </div>
+    </details>
+    <div class="row" style="justify-content:flex-end">
+      <button id="twRegister">Register number</button>
+    </div>`;
+
+  $('#twRegister').onclick = async () => {
+    const v = id => $(id).value.trim();
+    if (!v('#twNumber') || !v('#twName')) return setStatus('Phone number and display name are required.', 'err');
+    const profile = { name: v('#twName'), vertical: $('#twVertical').value };
+    if (v('#twAbout')) profile.about = v('#twAbout');
+    if (v('#twAddress')) profile.address = v('#twAddress');
+    if (v('#twDescription')) profile.description = v('#twDescription');
+    if (v('#twLogo')) profile.logo_url = v('#twLogo');
+    if (v('#twWebsite')) profile.websites = [v('#twWebsite')];
+    if (v('#twEmail')) profile.emails = [v('#twEmail')];
+    const input = {
+      orgId, number: v('#twNumber'), profile,
+      verificationMethod: $('input[name=twVerify]:checked').value,
+    };
+
+    $('#twRegister').disabled = true;
+    setStatus('Registering with Twilio…', 'busy');
+    try {
+      const r = await jsonPost('/api/whatsapp/twilio/senders', input);
+      twReg = { input, accountId: r.account?.id };
+      await loadChannels();
+      renderMethodBody();
+      setStatus(`Registered ${r.account?.externalId || input.number}. Status: ${r.sender.status}.`, 'ok');
+      toast('Twilio sender created');
+    } catch (e) {
+      $('#twRegister').disabled = false;
+      setStatus('Could not register: ' + e.message, 'err');
+    }
+  };
 }
 
 // ---------- boot ----------
