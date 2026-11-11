@@ -5,11 +5,13 @@
 import { GRAPH, baseCaps, messengerConnector, metaAttachmentType } from "../connectors/meta";
 import type { ChannelConnector, MessageType, NormalizedMessage, SendResult } from "../types";
 import { META_RATE_LIMIT_CODES, gateOutbound } from "./outbound";
+import { isTwilioAccount, sendTwilioWhatsapp } from "./twilio";
 
 export const whatsappConnector: ChannelConnector = {
   channelType: () => "whatsapp",
   credentialFields: () => [
-    { key: "token", label: "WhatsApp Access Token", secret: true, help: "System user token, or the temporary token from API Setup." },
+    { key: "provider", label: "Provider", secret: false, placeholder: "meta", help: "meta (WhatsApp Cloud API) or twilio. For twilio, the account id is the Twilio sender number, e.g. +14155238886, its incoming-message webhook is /webhooks/twilio/whatsapp, and it uses the Twilio Account SID and Auth Token from Settings." },
+    { key: "token", label: "WhatsApp Access Token", secret: true, help: "Meta only. System user token, or the temporary token from API Setup." },
   ],
   capabilities: () =>
     baseCaps({
@@ -54,6 +56,8 @@ export const whatsappConnector: ChannelConnector = {
   },
 
   async send(account, out): Promise<SendResult> {
+    if (isTwilioAccount(account)) return sendTwilioWhatsapp(account, out);
+
     const gate = gateOutbound();
     if (!gate.ok) return { ok: false, error: gate.error };
 

@@ -1,0 +1,293 @@
+openapi: 3.1.0
+info:
+  title: WhatsApp via Twilio
+  version: 1.0.0
+  description: |
+    Twilio as a second provider for the `whatsapp` channel, next to Meta's Cloud API.
+    Messages land in the same Inbox and use the same WhatsApp rate limits.
+
+    Twilio Account SID and Auth Token always come from **Settings → Twilio**
+    (`twilio_account_sid`, `twilio_auth_token`), the same ones voice uses.
+
+    Setup guide: `docs/whatsapp-channel/twilio-setup.md`.
+    Code: `src/whatsapp/twilio.ts`, `src/index.ts`.
+
+servers:
+  - url: https://your-host
+  - url: http://localhost:3000
+
+tags:
+  - name: Webhook
+    description: Called by Twilio.
+  - name: Channels
+    description: Connect a Twilio WhatsApp number to an organisation.
+  - name: Conversations
+    description: Reply to a customer.
+
+paths:
+  /webhooks/twilio/whatsapp:
+    post:
+      tags: [Webhook]
+      operationId: twilioWhatsappInbound
+      summary: Incoming WhatsApp message from Twilio
+      description: |
+        Set this as the sender's "When a message comes in" URL in the Twilio Console.
+
+        Steps: parse form → check `X-Twilio-Signature` → inbound rate limit → ingest.
+
+        Answers 200 even when the message is dropped (unknown number, throttled,
+        duplicate, not a message), so Twilio does not retry. Only a bad signature gets 401.
+
+        The signature check is skipped when the Auth Token in Settings is blank (dev only).
+      security: []
+      parameters:
+        - name: X-Twilio-Signature
+          in: header
+          required: false
+          description: |
+            base64(HMAC-SHA1(authToken, publicUrl + sorted key+value pairs)).
+            Required whenever an Auth Token is set in Settings.
+            `publicUrl` must be exactly the URL Twilio called; behind a proxy, send
+            `X-Forwarded-Proto` and `X-Forwarded-Host`.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/TwilioInboundForm" }
+            examples:
+              text:
+                summary: Text message
+                value:
+                  MessageSid: SM1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d
+                  AccountSid: AC00000000000000000000000000000000
+                  From: whatsapp:+6281234567
+                  To: whatsapp:+817090272916
+                  Body: halo
+                  ProfileName: Budi
+                  WaId: "6281234567"
+                  NumMedia: "0"
+              image:
+                summary: Image with caption
+                value:
+                  MessageSid: MM1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d
+                  From: whatsapp:+6281234567
+                  To: whatsapp:+817090272916
+                  Body: see photo
+                  NumMedia: "1"
+                  MediaUrl0: https://api.twilio.com/2010-04-01/Accounts/AC.../Messages/MM.../Media/ME...
+                  MediaContentType0: image/jpeg
+      responses:
+        "200":
+          description: Received (stored, or dropped on purpose). Empty TwiML.
+          content:
+            text/xml:
+              schema: { type: string }
+              example: <Response/>
+        "401":
+          description: Signature did not match the Auth Token in Settings.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: invalid signature
+
+  /api/channels:
+    post:
+      tags: [Channels]
+      operationId: connectChannel
+      summary: Connect (or update) a Twilio WhatsApp number
+      description: |
+        Same endpoint as every channel. For Twilio, set `channelType: whatsapp`,
+        `credentials.provider: twilio`, and `externalId` to the sender number.
+
+        `externalId` must match Twilio's `To` exactly: `+` and digits only,
+        no spaces, dashes, or `whatsapp:` prefix (e.g. `+817090272916`).
+
+        Send `id` to update an existing account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConnectTwilioWhatsapp" }
+            example:
+              orgId: 0d842648-9e0f-41cf-a98b-1c206d5acdf2
+              channelType: whatsapp
+              externalId: "+817090272916"
+              displayName: Support WA (Twilio)
+              credentials:
+                provider: twilio
+      responses:
+        "200":
+          description: Saved account. Secrets are never returned.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChannelAccount" }
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: That number is already connected to another organisation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: that whatsapp id is already connected to another organisation }
+
+  /api/conversations/{conversationId}/reply:
+    post:
+      tags: [Conversations]
+      operationId: replyToConversation
+      summary: Reply to a customer
+      description: |
+        Unchanged endpoint. When the conversation's account has `provider: twilio`,
+        the reply goes out through Twilio:
+
+        `POST https://api.twilio.com/2010-04-01/Accounts/{SID}/Messages.json`
+        with `From=whatsapp:<account number>`, `To=whatsapp:<customer>`, `Body=<text>`.
+
+        Text only. Outside the 24h window WhatsApp needs a template (not supported yet).
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, example: hello back }
+      responses:
+        "200":
+          description: Sent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReplyResult" }
+              example:
+                ok: true
+                conversationId: c03494a0-c607-4a41-9fed-2a814ac74e01
+                externalMessageId: SM9f8e7d6c5b4a39281706f5e4d3c2b1a0
+        "400":
+          description: Not sent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReplyResult" }
+              examples:
+                notConfigured:
+                  value: { ok: false, error: Twilio Account SID and Auth Token are not set in Settings }
+                ourLimit:
+                  value: { ok: false, error: "rate limited: WhatsApp outbound limit reached, retry in 12s" }
+                twilioLimit:
+                  summary: Twilio 429 / error 20429 or 63018
+                  value: { ok: false, error: "rate limited by Twilio: ..." }
+                windowClosed:
+                  value: { ok: false, error: 24h window closed — use an approved template }
+                twilioError:
+                  value: { ok: false, error: Authentication Error - invalid username }
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: sid
+      description: Session cookie from signing in. Admin role needed for /api/channels.
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    TwilioInboundForm:
+      type: object
+      required: [MessageSid, From, To]
+      description: Fields Twilio posts. Others may arrive and are kept in rawPayload.
+      properties:
+        MessageSid: { type: string, description: "→ externalMessageId (dedupe key)" }
+        AccountSid: { type: string }
+        From: { type: string, example: "whatsapp:+6281234567", description: "→ externalUserId (prefix stripped)" }
+        To: { type: string, example: "whatsapp:+817090272916", description: "→ account lookup (prefix stripped)" }
+        Body: { type: string, description: "→ body" }
+        ProfileName: { type: string, description: "→ senderName" }
+        WaId: { type: string }
+        NumMedia: { type: string, example: "0", description: "Count of MediaUrlN / MediaContentTypeN pairs" }
+        MediaUrl0: { type: string, format: uri }
+        MediaContentType0: { type: string, example: image/jpeg }
+        Latitude: { type: string, description: "Present on location messages" }
+        Longitude: { type: string }
+      additionalProperties: { type: string }
+
+    ConnectTwilioWhatsapp:
+      type: object
+      required: [orgId, channelType, externalId, credentials]
+      properties:
+        id: { type: string, description: Existing account id, to update it }
+        orgId: { type: string }
+        channelType: { type: string, const: whatsapp }
+        externalId:
+          type: string
+          pattern: '^\+[1-9][0-9]{6,14}$'
+          example: "+817090272916"
+          description: Twilio sender number, E.164, no spaces or dashes.
+        displayName: { type: string }
+        credentials:
+          type: object
+          required: [provider]
+          properties:
+            provider:
+              type: string
+              enum: [meta, twilio]
+              description: Blank or meta = WhatsApp Cloud API.
+
+    ChannelAccount:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        channelType: { type: string, example: whatsapp }
+        credentialSource: { type: string, enum: [byo_keys, oauth_via_us] }
+        externalId: { type: string, example: "+817090272916" }
+        displayName: { type: string }
+        status: { type: string, enum: [pending, active, expired, revoked] }
+        provider: { type: [string, "null"], example: twilio }
+        capabilities: { type: object }
+        fields:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              label: { type: string }
+              secret: { type: boolean }
+              value: { type: string, description: Always blank for secrets }
+              configured: { type: boolean }
+
+    ReplyResult:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        error: { type: string }
+        conversationId: { type: string }
+        externalMessageId: { type: string, description: Twilio message SID (SM…) }
+        threadId: { type: string }
+
+security:
+  - session: []
