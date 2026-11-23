@@ -49,7 +49,13 @@ export function voiceToken(identity: string, ttlSeconds = 3600): string {
  *  pairs)). The url must be the public one Twilio called. Blank auth token =
  *  check skipped (dev), matching the Meta webhook behaviour. */
 export function validTwilioSignature(publicUrl: string, params: Record<string, string>, header: string | null): boolean {
-  const { authToken } = voiceConfig();
+  return twilioSignatureMatches(voiceConfig().authToken, publicUrl, params, header);
+}
+
+/** The check itself, for any Twilio webhook (WhatsApp uses it too). */
+export function twilioSignatureMatches(
+  authToken: string, publicUrl: string, params: Record<string, string>, header: string | null,
+): boolean {
   if (!authToken) return true;
   if (!header) return false;
   const data = publicUrl + Object.keys(params).sort().map((k) => k + params[k]).join("");
