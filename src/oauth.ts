@@ -9,10 +9,10 @@
 // destination reached without the client ever seeing an access token.
 
 import { appSetting } from "./settings";
-import { accountByExternal, upsertAccount } from "./store";
+import { accountByExternal, updateAccountConnection, upsertAccount } from "./store";
 import type { ChannelAccount, ChannelType } from "./types";
 
-const GRAPH = () => `https://graph.facebook.com/${appSetting("meta_graph_version") || "v26.0"}`;
+const GRAPH = () => `https://graph.facebook.com/${appSetting("meta_graph_version") || "v21.0"}`;
 
 export interface EmbeddedSignupInput {
   orgId: string;
@@ -20,6 +20,10 @@ export interface EmbeddedSignupInput {
   wabaId: string;
   phoneNumberId: string;
   displayName?: string;
+  /** Two-step verification PIN set on the number when it is registered. */
+  pin?: string;
+  /** The client kept the number on the WhatsApp Business app (coexistence). */
+  coexistence?: boolean;
 }
 
 export interface ConnectResult {
@@ -73,9 +77,34 @@ async function describeNumber(phoneNumberId: string, token: string) {
   return res.ok ? json : null;
 }
 
+/** Step 3: register the number with the Cloud API. Without it the number
+ *  receives nothing and sends fail with 133010. Re-registering an already
+ *  registered number with the same PIN is harmless. */
+async function registerNumber(phoneNumberId: string, token: string, pin: string) {
+  const res = await fetch(`${GRAPH()}/${phoneNumberId}/register`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", pin }),
+  });
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success) {
+    const e = json.error;
+    const detail = e?.error_data?.details ? ` (${e.error_data.details})` : "";
+    return { ok: false as const, error: (e?.message ?? `HTTP ${res.status}`) + detail };
+  }
+  return { ok: true as const };
+}
+
 export async function completeWhatsAppSignup(input: EmbeddedSignupInput): Promise<ConnectResult> {
-  if (!appSetting("meta_app_secret")) {
-    return { ok: false, step: "config", error: "Meta App Secret is not set in provider settings" };
+  if (!appSetting("meta_app_id") || !appSetting("meta_app_secret")) {
+    return { ok: false, step: "config", error: "Meta App ID and App Secret must be set in Settings" };
+  }
+  if (!input.coexistence && !/^\d{6}$/.test(input.pin ?? "")) {
+    return { ok: false, step: "config", error: "a 6-digit PIN is required to register the number" };
+  }
+  const existing = accountByExternal("whatsapp", input.phoneNumberId);
+  if (existing && existing.orgId !== input.orgId) {
+    return { ok: false, step: "config", error: "this number is already connected to another organisation" };
   }
 
   const exchanged = await exchangeCode(input.code);
@@ -89,17 +118,32 @@ export async function completeWhatsAppSignup(input: EmbeddedSignupInput): Promis
     input.displayName?.trim() ||
     (info?.verified_name ? `${info.verified_name} (${info.display_phone_number})` : "WhatsApp Business");
 
+  // Saved before registering, so a failed register leaves a visible pending
+  // account (with its token) that a retry can finish, not a lost grant.
+  const credentials: Record<string, string> = { provider: "meta", token: exchanged.token, wabaId: input.wabaId };
   const account = upsertAccount({
+    id: existing?.id,
     orgId: input.orgId,
     channelType: "whatsapp",
     credentialSource: "oauth_via_us",
     externalId: input.phoneNumberId,
     displayName: label,
-    status: "active",
-    credentials: { token: exchanged.token, wabaId: input.wabaId },
+    status: "pending",
+    credentials,
   });
 
-  return { ok: true, account };
+  // Coexistence numbers stay on the WhatsApp Business app; Meta says not to
+  // register them.
+  if (!input.coexistence) {
+    const registered = await registerNumber(input.phoneNumberId, exchanged.token, input.pin!);
+    if (!registered.ok) {
+      updateAccountConnection(account.id, credentials, "pending");
+      return { ok: false, step: "number registration", error: registered.error, account: { ...account, status: "pending" } };
+    }
+  }
+
+  updateAccountConnection(account.id, credentials, "active");
+  return { ok: true, account: { ...account, status: "active" } };
 }
 
 // ---------------------------------------------------------------------------

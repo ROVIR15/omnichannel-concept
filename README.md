@@ -122,6 +122,31 @@ the public URL changes on every restart, and every change means re-pasting the
 callback URL into the Meta dashboard — which is a reliable source of silent
 webhook failures.
 
+## WhatsApp Embedded Signup (Connect with Meta)
+
+On **Channels**, pick **whatsapp** → **Connect with Meta**, enter a 6-digit
+PIN, and click the button. Meta's popup lets the client pick or create a
+WhatsApp Business Account and add or verify a number. The server then:
+
+1. exchanges the code for a business token,
+2. subscribes this app to the WABA (`/{waba-id}/subscribed_apps`),
+3. registers the number with the Cloud API (`/{phone-number-id}/register`,
+   using the PIN) — skipped for coexistence numbers,
+4. stores an active WhatsApp channel. If registering fails, the channel is
+   kept as `pending` with its token, and connecting again retries.
+
+### Meta app setup
+
+1. Facebook Login for Business → **Configurations** → create one from the
+   **WhatsApp Embedded Signup** template. Copy its ID.
+2. Facebook Login for Business → Settings → **Allowed domains for the
+   JavaScript SDK**: add your tunnel domain. Open the console through that
+   HTTPS URL, not localhost.
+3. On **Settings**, save the App ID, App Secret and **WhatsApp Embedded Signup
+   Config ID** (or `META_WHATSAPP_CONFIG_ID`).
+4. The webhook (`/webhooks/meta`, field `messages`) must already be set up on
+   the app.
+
 ## Facebook Login (Messenger + Instagram)
 
 On **Channels**, pick **messenger** or **instagram**, then **Connect with
@@ -231,6 +256,6 @@ the stored one untouched.
 ## Not built (deliberate)
 
 Queue, websockets (the inbox polls), authentication, media download/upload,
-WhatsApp templates, OAuth/Embedded Signup onboarding, delivery-status webhooks,
+WhatsApp templates, delivery-status webhooks,
 WeChat. Credentials are stored as plaintext JSON — in production that column
 holds a vault reference.

@@ -10,7 +10,7 @@ import { ingest, inbox, reply, startConversation } from "./core";
 import { signingSecrets } from "./connectors/meta";
 import { connectorFor } from "./registry";
 import {
-  completeFacebookLogin, connectFacebookPage, facebookConfigured, facebookLoginUrl, facebookPages,
+  completeFacebookLogin, completeWhatsAppSignup, connectFacebookPage, facebookConfigured, facebookLoginUrl, facebookPages,
   type FacebookChannel,
 } from "./oauth";
 import { seedIfEmpty } from "./seed";
@@ -818,6 +818,35 @@ const server = Bun.serve({
         const r = await twilioSenders.deleteSender(sid);
         return r.ok ? json({ ok: true }) : json({ error: r.error, code: r.code }, r.status);
       }
+    }
+
+    // --- WhatsApp Embedded Signup (Connect with Meta) ---------------------
+    // The browser runs Meta's popup with the JS SDK; it only needs public ids.
+    if (path === "/api/integrations/whatsapp/status" && method === "GET") {
+      const appId = appSetting("meta_app_id");
+      const configId = appSetting("meta_whatsapp_config_id");
+      return json({
+        configured: Boolean(appId && appSetting("meta_app_secret") && configId),
+        appId,
+        configId,
+        graphVersion: appSetting("meta_graph_version") || "v21.0",
+      });
+    }
+
+    if (path === "/api/integrations/whatsapp/connect" && method === "POST") {
+      const b = await body<{
+        orgId?: string; code?: string; wabaId?: string; phoneNumberId?: string;
+        pin?: string; coexistence?: boolean; displayName?: string;
+      }>(req);
+      if (!b?.orgId || !b.code || !b.wabaId || !b.phoneNumberId) {
+        return json({ error: "orgId, code, wabaId and phoneNumberId are required" }, 400);
+      }
+      const r = await completeWhatsAppSignup({
+        orgId: b.orgId, code: b.code, wabaId: String(b.wabaId), phoneNumberId: String(b.phoneNumberId),
+        pin: b.pin?.trim(), coexistence: Boolean(b.coexistence), displayName: b.displayName,
+      });
+      if (r.ok) return json(maskAccount(r.account!));
+      return json({ error: `${r.step}: ${r.error}`, account: r.account ? maskAccount(r.account) : undefined }, 400);
     }
 
     // --- Facebook Login (Messenger + Instagram) ---------------------------

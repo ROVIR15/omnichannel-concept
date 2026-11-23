@@ -128,8 +128,8 @@
 // does not yet — shown rather than hidden, so the gap is visible.
 const CONNECT_METHODS = {
   whatsapp: [
-    { id:'meta_signup', title:'Connect with Meta', ready:false,
-      hint:'The client approves in Meta’s popup and never sees an access token. Needs POST /api/connect/whatsapp (src/oauth.ts is written, not routed).' },
+    { id:'meta_signup', title:'Connect with Meta', ready:true,
+      hint:'Embedded Signup: pick or add a number in Meta’s popup. The app gets a token, subscribes to webhooks and registers the number.' },
     { id:'manual', title:'Paste credentials', ready:true,
       hint:'Enter the phone number ID and access token from the Meta app dashboard.' },
     { id:'twilio_senders', title:'Register with Twilio', ready:true,
@@ -165,6 +165,8 @@ let outlook = { configured:false, connected:false };
 // Facebook: `session` points at Page tokens held on the server after the
 // OAuth callback; the browser only ever sees ids and names.
 let facebook = { configured:false, session:'', pages:null };
+// WhatsApp Embedded Signup: public ids only; the token stays on the server.
+let waSignup = { configured:false, appId:'', configId:'', graphVersion:'v21.0' };
 let pickedChannel = '';
 let pickedMethod = '';
 const openChannels = new Set();
@@ -296,6 +298,7 @@ function renderMethodBody() {
   if (pickedMethod === 'gmail') return renderGmailBody(body);
   if (pickedMethod === 'outlook') return renderOutlookBody(body);
   if (pickedMethod === 'meta_login') return renderFacebookBody(body);
+  if (pickedMethod === 'meta_signup') return renderWhatsAppSignupBody(body);
   if (pickedMethod === 'twilio_senders') return renderTwilioSenderBody(body);
   if (!CONNECT_METHODS[pickedChannel]?.find(m => m.id === pickedMethod)?.ready) { body.innerHTML = ''; return; }
   renderManualBody(body);
@@ -461,6 +464,108 @@ function renderFacebookBody(body) {
       setStatus(`Connected ${a.displayName}.`, 'ok');
       toast('Channel connected');
     } catch (e) { b.disabled = false; setStatus('Could not connect: ' + e.message, 'err'); }
+  });
+}
+
+// ---------- WhatsApp Embedded Signup ----------
+// Meta's SDK, loaded only when this method is opened.
+let fbSdk = null;
+function loadFacebookSdk() {
+  if (fbSdk) return fbSdk;
+  fbSdk = new Promise((resolve, reject) => {
+    window.fbAsyncInit = () => {
+      FB.init({ appId: waSignup.appId, autoLogAppEvents: true, xfbml: false, version: waSignup.graphVersion });
+      resolve();
+    };
+    const s = document.createElement('script');
+    s.src = 'https://connect.facebook.net/en_US/sdk.js';
+    s.async = true; s.defer = true; s.crossOrigin = 'anonymous';
+    s.onerror = () => { fbSdk = null; reject(new Error('could not load the Facebook SDK')); };
+    document.head.appendChild(s);
+  });
+  return fbSdk;
+}
+
+// The popup reports the WABA and phone number ids by postMessage; FB.login's
+// callback carries only the code. Both halves are needed.
+let waSession = null;
+window.addEventListener('message', ev => {
+  if (!/^https:\/\/([a-z]+\.)?facebook\.com$/.test(ev.origin)) return;
+  let d; try { d = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; } catch { return; }
+  if (d?.type !== 'WA_EMBEDDED_SIGNUP') return;
+  if (String(d.event).startsWith('FINISH')) {
+    waSession = {
+      wabaId: d.data?.waba_id, phoneNumberId: d.data?.phone_number_id,
+      coexistence: d.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+    };
+  } else if (d.event === 'CANCEL') {
+    waSession = { cancelled: true, step: d.data?.current_step, error: d.data?.error_message };
+  }
+});
+
+function renderWhatsAppSignupBody(body) {
+  if (!waSignup.configured) {
+    body.innerHTML = `<div class="sub">Save the Meta App ID, App Secret and
+      <b>WhatsApp Embedded Signup Config ID</b> on <a href="/">Settings</a> first.
+      This page must also be opened over HTTPS (your tunnel), and its domain listed under
+      Facebook Login for Business → Allowed domains for the JavaScript SDK.</div>`;
+    return;
+  }
+  body.innerHTML = `
+    <div class="grid">
+      <div class="field">
+        <label>Two-step PIN</label>
+        <input id="waPin" inputmode="numeric" maxlength="6" placeholder="6 digits" autocomplete="off" />
+        <div class="help">Set on the number when it is registered. Keep it — Meta asks for it to re-register.</div>
+      </div>
+    </div>
+    <button id="waConnect">Connect with Meta</button>`;
+  $('#waConnect').onclick = startWhatsAppSignup;
+}
+
+async function startWhatsAppSignup() {
+  const pin = $('#waPin').value.trim();
+  if (!/^\d{6}$/.test(pin)) { setStatus('Enter a 6-digit PIN first.', 'err'); return; }
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+    setStatus('Open this page over HTTPS (your tunnel URL) — Meta’s popup refuses plain HTTP.', 'err'); return;
+  }
+  const btn = $('#waConnect');
+  btn.disabled = true;
+  setStatus('Opening Meta…', 'busy');
+  try { await loadFacebookSdk(); }
+  catch (e) { btn.disabled = false; setStatus(e.message, 'err'); return; }
+
+  waSession = null;
+  const org = orgId;
+  FB.login(response => {
+    (async () => {
+      const code = response?.authResponse?.code;
+      // The FINISH message can trail the login callback by a moment.
+      for (let i = 0; i < 30 && !waSession && code; i++) await new Promise(r => setTimeout(r, 100));
+      if (!code || waSession?.cancelled) {
+        const why = waSession?.error || (waSession?.step ? `stopped at ${waSession.step}` : 'cancelled');
+        throw new Error(`Meta sign-up ${why}.`);
+      }
+      if (!waSession?.phoneNumberId) {
+        throw new Error('Meta did not return a phone number. Finish adding a number in the popup, then try again.');
+      }
+      setStatus('Saving token, subscribing to webhooks, registering the number…', 'busy');
+      const a = await jsonPost('/api/integrations/whatsapp/connect', {
+        orgId: org, code, pin, wabaId: waSession.wabaId,
+        phoneNumberId: waSession.phoneNumberId, coexistence: waSession.coexistence,
+      });
+      await loadChannels();
+      setStatus(`Connected ${a.displayName}. Messages to this number now land in the Inbox.`, 'ok');
+      toast('WhatsApp connected');
+    })().catch(async e => {
+      await loadChannels().catch(() => {});
+      setStatus('Could not connect: ' + e.message, 'err');
+    }).finally(() => { const b = $('#waConnect'); if (b) b.disabled = false; });
+  }, {
+    config_id: waSignup.configId,
+    response_type: 'code',
+    override_default_response_type: true,
+    extras: { setup: {}, featureType: '', sessionInfoVersion: '3' },
   });
 }
 
@@ -740,6 +845,8 @@ async function refresh() {
   outlook = outlookResult.status === 'fulfilled' ? outlookResult.value : { configured:false, connected:false };
   try { facebook.configured = (await api('/api/integrations/facebook/status')).configured; }
   catch { facebook.configured = false; }
+  try { waSignup = await api('/api/integrations/whatsapp/status'); }
+  catch { waSignup = { ...waSignup, configured:false }; }
   await loadFacebookPages();
   if (!pickedChannel) pickedChannel = channels.catalogue[0]?.channelType || '';
   renderPicker();
